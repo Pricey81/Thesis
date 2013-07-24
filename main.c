@@ -162,14 +162,23 @@ arm_biquad_casd_df1_inst_f32 S2; // = {2, pState2, pCoeffs2};
 
 // POST CIRCULAR BUFFER
 
-float buffer[BUFFER_SIZE];
+int16_t buffer[3][BUFFER_SIZE];
 short index = 0; // The tail of the loop
 short micValue;
+
+short inIndex = 0;
+short outIndex = 0;
+
+short readBlock = 0;
+short filterBlock = 1;
+short writeBlock = 2;
+
+bool filterWaiting = false;
 
 
 float tempSamps[2][BLOCK_SIZE];
 static FATFS fso; // The FILINFO structure holds a file information returned by f_stat and f_readdir function
-void DACWrite(unsigned short command,float data);
+void DACWrite(unsigned short command,short data);
 void InitSPI(void);
 void ADCIntHandler(void);
 void coeff_gen(char type, float32_t Fc, float32_t Q, float32_t *pCoeffs);
@@ -469,13 +478,13 @@ void InitSPI(void) {
 //////////////////////////////////////////////////////////////////////
 // set command, mask and data commands
 //////////////////////////////////////////////////////////////////////
-void DACWrite(unsigned short command, float data) {
+void DACWrite(unsigned short command, short data) {
 	//IntMasterDisable();
 	uint16_t write = 0;
 	// set command, mask and data commands
-	data = data * (0xFFF/2);
-	data = data + (0xFFF/2);
-	write = (uint16_t) data;
+	//data = data * (0xFFF/2);
+	//data = data + (0xFFF/2);
+	write = data;
 	write = 0x3000 |  write;
 
 	SSIDataPut(SSI2_BASE, write);
@@ -510,26 +519,23 @@ void ADC_initialise(void)
 }
 unsigned long ulADC0_Value[4];
 
+void readIn(short micValue) {
+        buffer[readBlock][outIndex] = micValue;
+}
+
 void ADCIntHandler(void)
 {
 	//while(!ADCIntStatus(ADC0_BASE, 0, false)) {
 	//}
 	ADCIntClear(ADC0_BASE, 0);
 	ADCSequenceDataGet(ADC0_BASE, 0, ulADC0_Value);
-	UARTprintf("FX-1A = %5d, FX-1B = %5d, FX-2A = %5d, FX-2B = %5d\r\n",
-	ulADC0_Value[0]/32, ulADC0_Value[1]/32, ulADC0_Value[2]/32, ulADC0_Value[3]/32);
-}
+	// UARTprintf("FX-1A = %5d, FX-1B = %5d, FX-2A = %5d, FX-2B = %5d\r\n",
+	// ulADC0_Value[0]/32, ulADC0_Value[1]/32, ulADC0_Value[2]/32, ulADC0_Value[3]/32);
 
-void readIn(short micValue) {
-        if (index == BUFFER_SIZE) {
-                index = 0;
-        } else {
-                index++;
-        }
-        applyFilter(filter_1);
-        buffer[index] = micValue;
+	readIn(ulADC0_Value[0]);
 
 }
+
 
 short getOut() {
         return buffer[index];
@@ -549,21 +555,25 @@ void applyFilter(int filterUsed){
 	Q = 0.707f;
 	coeff_gen('L', Fc, Q, pCoeffs1); // Not sure what pCoeffs1 is
 
+	/*
 	int i;
 	short loopIndex = index - 1;
 	if (loopIndex < 0) {
 		loopIndex = BUFFER_SIZE - 1;
 	}
 	while (loopIndex != index) {
+	*/
 
-		micValue = buffer[loopIndex];
-		sampleSrc[i] = micValue;
-		arm_biquad_cascade_df1_f32(&S1,  sampleSrc, &micOut[128], BLOCK_SIZE);
+		//micValue = buffer[loopIndex];
+		//sampleSrc[i] = micValue;
+		arm_biquad_cascade_df1_q15(&S1,  &buffer[filterBlock], &buffer[filterBlock], BLOCK_SIZE);
+		/*
 		loopIndex++;
 		if (loopIndex == BUFFER_SIZE) {
 			loopIndex = 0;
 		}
-	}
+		*/
+
 }
 
 void coeff_gen(char type, float32_t Fc, float32_t Q, float32_t *pCoeffs) {
@@ -631,9 +641,29 @@ void coeff_gen(char type, float32_t Fc, float32_t Q, float32_t *pCoeffs) {
 
 void Timer1IntHandler(void)
 {
+
 	TimerIntClear(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
-	readIn(micValue);
-	DACWrite(3, micOut[128]);
+	DACWrite(3, buffer[writeBlock][outIndex]);
+	outIndex++;
+
+	if(outIndex >= BUFFER_SIZE) {
+		outIndex = 0;
+		inIndex = 0;
+		readBlock++;
+		filterBlock++;
+		writeBlock++;
+		if(readBlock > 2) {
+			readBlock = 0;
+		}
+		if(filterBlock > 2) {
+			filterBlock = 0;
+		}
+		if(writeBlock > 2) {
+			writeBlock = 0;
+		}
+		filterWaiting = true;
+	}
+
 	ADCProcessorTrigger(ADC0_BASE, 0);
 }
 
@@ -811,16 +841,23 @@ void main(void) {
 	TimerIntEnable(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
 	TimerIntEnable(TIMER2_BASE, TIMER_TIMA_TIMEOUT);
 	TimerIntEnable(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
+
+	ADC_initialise();
+	PortFunctionInit();
 	// Enable the timers.
 	//
 	TimerEnable(TIMER1_BASE, TIMER_A);
 	TimerEnable(TIMER2_BASE, TIMER_A);
 	TimerEnable(TIMER0_BASE, TIMER_A);
 
-	PortFunctionInit();
-	ADC_initialise();
+
+
 
 	while (1){
+		if(filterWaiting) {
+			filterWaiting = 0;
+			// applyFilter(filter_1);
+		}
 		//ADCProcessorTrigger(ADC0_BASE, 0);
    	}
 }
