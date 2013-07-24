@@ -152,12 +152,13 @@ float32_t ADC_input4;
 int filter_1 = 1;
 int filter_2 = 2;
 char info[100];
-float32_t pCoeffs1[5], pCoeffs2[5];
+q15_t pCoeffs1[5], pCoeffs2[5];
 uint8_t numStages = 1;
-float32_t pState1[4], pState2[4];
+q15_t pState1[4], pState2[4];
+int8_t postShift = 0;
 unsigned long ulADC0_Value[4];
 float32_t filter_Output[2][BLOCK_SIZE];
-arm_biquad_casd_df1_inst_f32 S1; // = {1, pState1, pCoeffs1};
+arm_biquad_casd_df1_inst_q15 S1; // = {1, pState1, pCoeffs1};
 arm_biquad_casd_df1_inst_f32 S2; // = {2, pState2, pCoeffs2};
 
 // POST CIRCULAR BUFFER
@@ -181,7 +182,7 @@ static FATFS fso; // The FILINFO structure holds a file information returned by 
 void DACWrite(unsigned short command,short data);
 void InitSPI(void);
 void ADCIntHandler(void);
-void coeff_gen(char type, float32_t Fc, float32_t Q, float32_t *pCoeffs);
+void coeff_gen(char type, float32_t Fc, float32_t Q, q15_t *pCoeffs);
 void applyFilter(int filterUsed);
 // mass storage starts
 
@@ -536,15 +537,12 @@ void ADCIntHandler(void)
 
 }
 
-
+/*
 short getOut() {
         return buffer[index];
-}
+}*/
 
 void applyFilter(int filterUsed){
-	float32_t sampleSrc[BLOCK_SIZE];
-	short micValue = (float32_t)(ulADC0_Value[0]/32);
-	// Set up what we need for filter
 	if (GPIOPinRead(GPIO_PORTF_BASE, ChestSounds) == ChestSounds) {
 		Fc = 1000.0f; // Chest sounds
 	} else if (GPIOPinRead(GPIO_PORTF_BASE, ExtendedMode) == ExtendedMode) {
@@ -555,28 +553,11 @@ void applyFilter(int filterUsed){
 	Q = 0.707f;
 	coeff_gen('L', Fc, Q, pCoeffs1); // Not sure what pCoeffs1 is
 
-	/*
-	int i;
-	short loopIndex = index - 1;
-	if (loopIndex < 0) {
-		loopIndex = BUFFER_SIZE - 1;
-	}
-	while (loopIndex != index) {
-	*/
-
-		//micValue = buffer[loopIndex];
-		//sampleSrc[i] = micValue;
-		arm_biquad_cascade_df1_q15(&S1,  &buffer[filterBlock], &buffer[filterBlock], BLOCK_SIZE);
-		/*
-		loopIndex++;
-		if (loopIndex == BUFFER_SIZE) {
-			loopIndex = 0;
-		}
-		*/
+	arm_biquad_cascade_df1_q15(&S1,  &buffer[filterBlock], &buffer[filterBlock], BLOCK_SIZE);
 
 }
 
-void coeff_gen(char type, float32_t Fc, float32_t Q, float32_t *pCoeffs) {
+void coeff_gen(char type, float32_t Fc, float32_t Q, q15_t *pCoeffs) {
 	float b1_output = 0;
 	float b2_output = 0;
 	float b3_output = 0;
@@ -641,7 +622,6 @@ void coeff_gen(char type, float32_t Fc, float32_t Q, float32_t *pCoeffs) {
 
 void Timer1IntHandler(void)
 {
-
 	TimerIntClear(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
 	DACWrite(3, buffer[writeBlock][outIndex]);
 	outIndex++;
@@ -711,7 +691,7 @@ PortFunctionInit(void)
 	// GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_0 | GPIO_PIN_1);
 
 	// initialise filters
-	arm_biquad_cascade_df1_init_f32(&S1, 1, pCoeffs1, pState1);
+	arm_biquad_cascade_df1_init_q15(&S1, 1, pCoeffs1, pState1, postShift);
 
 }
 
@@ -850,14 +830,11 @@ void main(void) {
 	TimerEnable(TIMER2_BASE, TIMER_A);
 	TimerEnable(TIMER0_BASE, TIMER_A);
 
-
-
-
 	while (1){
-		if(filterWaiting) {
-			filterWaiting = 0;
-			// applyFilter(filter_1);
-		}
+	//	if(filterWaiting) {
+	//		filterWaiting = 0;
+			applyFilter(filter_1);
+	//	}
 		//ADCProcessorTrigger(ADC0_BASE, 0);
    	}
 }
