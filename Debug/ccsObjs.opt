@@ -1,0 +1,1 @@
+"./fatfs/ff.obj" "./ustdlib.obj" "./usbdsdcard.obj" "./usb_msc_structs.obj" "./uartstdio.obj" "./startup_ccs.obj" "./mmc-ek-lm4f232h5qd.obj" "./main.obj" -l"C:\Users\PRICEY\workspace_v5_2\DSP\Debug\DSP.lib" -l"C:\StellarisWare\usblib\ccs-cm4f\Debug\usblib-cm4f.lib" -l"libc.a" -l"C:\StellarisWare\driverlib\ccs-cm4f\Debug\driverlib-cm4f.lib" "../lm4f120h5qr.cmd" 
