@@ -1,3 +1,6 @@
+///////////////////////////////////////////
+// THESIS- 2013
+///////////////////////////////////////////
 #include "inc/hw_ints.h"
 #include "inc/hw_memmap.h"
 #include "inc/hw_types.h"
@@ -33,7 +36,6 @@
 #include "driverlib/adc.h"
 #include <stdint.h>
 #include <stdlib.h>
-
 #include "driverlib/usb.h"
 #include "driverlib/udma.h"
 #include "usblib/usblib.h"
@@ -48,9 +50,9 @@
 #define NOTCH 4
 #define BITCRUSHER_DECIMATOR 5
 #define BITWISE_KO 6
-
+///////////////////////////////////////////
 // mass storage end
-
+///////////////////////////////////////////
 #define pi 3.14159
 #define Fs 44100
 #define	FA_CREATE_ALWAYS	0x08
@@ -58,127 +60,89 @@
 
 #define LED_RED  GPIO_PIN_1
 #define LED_BLUE  GPIO_PIN_2
-//#define LED_GREEN GPIO_PIN_3
-
+///////////////////////////////////////////
 // Define rows for matrix
 // PORT F
+///////////////////////////////////////////
 #define ROW_1 GPIO_PIN_0
 #define ROW_2 GPIO_PIN_1
 #define ROW_3 GPIO_PIN_3  //GPIO_PIN_2 used for led troubleshooting and indication
 #define ROW_4 GPIO_PIN_4
-
+///////////////////////////////////////////
 // Define cols for matrix
 // PORT C
+///////////////////////////////////////////
 #define COL_1 GPIO_PIN_4
 #define COL_2 GPIO_PIN_5
 #define COL_3 GPIO_PIN_6
 #define COL_4 GPIO_PIN_7
-
+///////////////////////////////////////////
 //Port E - LED'S GND
 #define LED_GND1 GPIO_PIN_5 // E
 #define LED_GND2 GPIO_PIN_0 // E
-
+///////////////////////////////////////////
 //Port A - LED'S GND
 #define LED_GND3 GPIO_PIN_6
 #define LED_GND4 GPIO_PIN_7
-
+///////////////////////////////////////////
 // Port D - LED YELLOW
 #define LED_YEL1 GPIO_PIN_2 // SW 4
 #define LED_YEL2 GPIO_PIN_3 // SW 3
 #define LED_YEL3 GPIO_PIN_6 // SW 2
 #define LED_YEL4 GPIO_PIN_7 // SW 1
-
+///////////////////////////////////////////
 // Port D & B - LED GREEN
 #define LED_GRN1 GPIO_PIN_0 // SW 4 - D
 #define LED_GRN2 GPIO_PIN_1 // SW 3 - D
 #define LED_GRN3 GPIO_PIN_0 // SW 2 -B
 #define LED_GRN4 GPIO_PIN_1 // SW 1 - B
-
-
+///////////////////////////////////////////
+// Stethoscope
+///////////////////////////////////////////
 #define ChestSounds GPIO_PIN_2 // SW 1 - F
 #define ExtendedMode GPIO_PIN_2 // SW 1 - B
 #define TEMPO_LED GPIO_PIN_3
 #define LED_1_GND GPIO_PIN_6
-
-
 #define NUM_SAMPLES 128
 #define BLOCK_SIZE 128
-
 #define BUFFER_SIZE 256
-
+///////////////////////////////////////////
+// DACWrite variables
+///////////////////////////////////////////
 char test = 0;
 unsigned short data;
-unsigned short Counter;
 unsigned short command;
-unsigned int write = 0;
-int dacCounter = 0;
-int dacWrite = 1;
-int period;
-int col;
-int row;
-WORD br;
-int cnt = 0;
-uint8_t volatile buttonFound = 0;
-FRESULT rc;
-bool sampleWaiting = true;
-bool set_ChestSounds = true;
-int trigger = 0;
-float nextVal = 0;
-int loopTime = 0;
-unsigned long switch_in_play[4][2];
-float32_t micOut[NUM_SAMPLES];
-char samplePlaying = 0;
-char sampleLoading = 1;
-int samplePoint = 0;
-int toggle = 0;
-int BPM; // = 240;
-
-float32_t lut_speed = 0;
-uint16_t lut_value = 0;
-int lfo_enable;
-uint8_t val = 0;
-int fXNum;
-
-long groundArray[] = {COL_1, COL_2, COL_3, COL_4};
-long switchArray[] = {ROW_1, ROW_2, ROW_3, ROW_4};
-//LED Count
-
-int hold_switch = 0;
+///////////////////////////////////////////
+// Biquad Gene
+///////////////////////////////////////////
 float32_t Fc;
 float32_t Q;
-float32_t ADC_input4;
-
-// config mass storage
 int filter_1 = 1;
 int filter_2 = 2;
-char info[100];
-uint16_t pCoeffs1[5], pCoeffs2[5];
+q15_t pCoeffs1[5], pCoeffs2[5];
 uint8_t numStages = 1;
 q15_t pState1[4], pState2[4];
 int8_t postShift = 1;
-unsigned long ulADC0_Value[4];
-float32_t filter_Output[2][BLOCK_SIZE];
+///////////////////////////////////////////
+// Biquad
+///////////////////////////////////////////
 arm_biquad_casd_df1_inst_q15 S1; // = {1, pState1, pCoeffs1};
-arm_biquad_casd_df1_inst_f32 S2; // = {2, pState2, pCoeffs2};
-
-// POST CIRCULAR BUFFER
-
-int16_t buffer[3][BUFFER_SIZE];
+///////////////////////////////////////////
+//CIRCULAR BUFFER
+///////////////////////////////////////////
+q15_t buffer[3][BUFFER_SIZE];
 short index = 0; // The tail of the loop
 short micValue;
-
 short inIndex = 0;
 short outIndex = 0;
-
 short readBlock = 0;
 short filterBlock = 1;
 short writeBlock = 2;
-
 bool filterWaiting = false;
-
-
-float tempSamps[2][BLOCK_SIZE];
 static FATFS fso; // The FILINFO structure holds a file information returned by f_stat and f_readdir function
+///////////////////////////////////////////
+// Prototypes
+///////////////////////////////////////////
 void DACWrite(unsigned short command,short data);
 void InitSPI(void);
 void ADCIntHandler(void);
@@ -480,12 +444,8 @@ void InitSPI(void) {
 // set command, mask and data commands
 //////////////////////////////////////////////////////////////////////
 void DACWrite(unsigned short command, short data) {
-	//IntMasterDisable();
 	uint16_t write = 0;
 	// set command, mask and data commands
-	//data = data * (0xFFF/2);
-	//data = data + (0xFFF/2);
-	write = data;
 	write = 0x3000 |  write;
 
 	SSIDataPut(SSI2_BASE, write);
@@ -495,7 +455,6 @@ void DACWrite(unsigned short command, short data) {
 	while(SSIBusy(SSI2_BASE))
 	{
 	}
-	//IntMasterEnable();
 }
 
 void ADC_initialise(void)
@@ -537,11 +496,6 @@ void ADCIntHandler(void)
 
 }
 
-/*
-short getOut() {
-        return buffer[index];
-}*/
-
 void applyFilter(int filterUsed){
 	if (GPIOPinRead(GPIO_PORTF_BASE, ChestSounds) == ChestSounds) {
 		Fc = 1000.0f; // Chest sounds
@@ -553,7 +507,7 @@ void applyFilter(int filterUsed){
 	Q = 0.707f;
 	coeff_gen('L', Fc, Q, pCoeffs1); // Not sure what pCoeffs1 is
 
-	arm_biquad_cascade_df1_q15(&S1,  &buffer[filterBlock], &buffer[filterBlock], BLOCK_SIZE);
+	arm_biquad_cascade_df1_q15(&S1,  &buffer[filterBlock],  &buffer[filterBlock], BLOCK_SIZE);
 
 }
 
@@ -688,8 +642,6 @@ PortFunctionInit(void)
 	GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3 | GPIO_PIN_6 | GPIO_PIN_7);
 	GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, GPIO_PIN_0 | GPIO_PIN_5);
 
-	// GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_0 | GPIO_PIN_1);
-
 	// initialise filters
 	arm_biquad_cascade_df1_init_q15(&S1, 1, pCoeffs1, pState1, postShift);
 
@@ -714,10 +666,9 @@ void initialLED(){
 	GPIOPinWrite(GPIO_PORTD_BASE, LED_YEL1 | LED_YEL2 | LED_YEL3 | LED_YEL4, 0);
 }
 
-/*
- * main.c
- */
-
+///////////////////////////////////////////
+// MAIN.C
+///////////////////////////////////////////
 void main(void) {
 
 	///////////////////////////////////////////////////////////////
@@ -835,6 +786,5 @@ void main(void) {
 	//		filterWaiting = 0;
 			applyFilter(filter_1);
 	//	}
-		//ADCProcessorTrigger(ADC0_BASE, 0);
-   	}
+	}
 }
