@@ -140,7 +140,7 @@ short readBlock = 0;
 short filterBlock = 1;
 short writeBlock = 2;
 bool filterWaiting = false;
-q15_t tempSrc[2][BLOCK_SIZE];
+q15_t tempSrc[1][BLOCK_SIZE];
 int i;
 static FATFS fso; // The FILINFO structure holds a file information returned by f_stat and f_readdir function
 ///////////////////////////////////////////
@@ -449,7 +449,7 @@ void InitSPI(void) {
 void DACWrite(unsigned short command, short data) {
 	uint16_t write = 0;
 	// set command, mask and data commands
-	write = 0x3000 |  write;
+	write = 0x3000 |  data;
 
 	SSIDataPut(SSI2_BASE, write);
 	//
@@ -507,7 +507,7 @@ void applyFilter(int filterUsed){
 	}
 	Q = 0.707f;
 	coeff_gen('L', Fc, Q, pCoeffs1); // Not sure what pCoeffs1 is
-    arm_copy_q15(buffer[filterBlock], &tempSrc[0][0], BLOCK_SIZE);
+    arm_copy_q15(&buffer[filterBlock], &tempSrc[0], BLOCK_SIZE);
 	arm_biquad_cascade_df1_q15(&S1, &tempSrc[0][0], &buffer[filterBlock], BLOCK_SIZE);
 }
 
@@ -714,17 +714,11 @@ void main(void) {
 	// Set the USB stack mode to Device mode with VBUS monitoring.
 	//
 	USBStackModeSet(0, USB_MODE_DEVICE, 0);
-
 	//
 	// Pass our device information to the USB library and place the device
 	// on the bus.
 	//
 	USBDMSCInit(0, (tUSBDMSCDevice *)&g_sMSCDevice);
-
-	//
-	// Determine whether or not an SDCard is installed.  If not, print a
-	// warning and have the user install one and restart.
-	//
 	ulRetcode = disk_initialize(0);
 
 	// mass storage end
@@ -760,9 +754,9 @@ void main(void) {
 	// Enable the timers.
 	TimerEnable(TIMER1_BASE, TIMER_A);
 	while (1){
-//		if(filterWaiting) {
-//			filterWaiting = 0;
-//			applyFilter(filter_1);
-//		}
+	//	if(filterWaiting) {
+	//	    filterWaiting = 0;
+		applyFilter(filter_1);
+	//	}
 	}
 }
