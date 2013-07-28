@@ -500,15 +500,15 @@ void ADCIntHandler(void)
 void applyFilter(int filterUsed){
 	if (GPIOPinRead(GPIO_PORTF_BASE, ChestSounds) == ChestSounds) {
 		Fc = 1000.0f; // Chest sounds
-	} else if (GPIOPinRead(GPIO_PORTF_BASE, ExtendedMode) == ExtendedMode) {
+	} else if (GPIOPinRead(GPIO_PORTB_BASE, ExtendedMode) == ExtendedMode) {
 		Fc = 4000.0f; // Extend mode
 	} else {
-		Fc = 250.0F; // Heart Ascultations
+		Fc = 250.0f; // Heart Ascultations
 	}
 	Q = 0.707f;
-	coeff_gen('L', Fc, Q, pCoeffs1); // Not sure what pCoeffs1 is
+	coeff_gen('L', Fc, Q, pCoeffs1);
     arm_copy_q15(&buffer[filterBlock][0], &tempSrc[0], BLOCK_SIZE);
-	arm_biquad_cascade_df1_q15(&S1, &tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
+  //  arm_biquad_cascade_df1_q15(&S1,  &buffer[filterBlock][0], &buffer[filterBlock][0], BLOCK_SIZE);
 }
 
 void coeff_gen(char type, float32_t Fc, float32_t Q, q15_t *pCoeffs) {
@@ -754,9 +754,9 @@ void main(void) {
 	// Enable the timers.
 	TimerEnable(TIMER1_BASE, TIMER_A);
 	while (1){
-	//	if(filterWaiting) {
-	//	    filterWaiting = 0;
-		applyFilter(filter_1);
-	//	}
+		if(filterWaiting) {
+			filterWaiting = 0;
+			applyFilter(filter_1);
+		}
 	}
 }
