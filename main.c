@@ -119,7 +119,7 @@ float32_t Fc;
 float32_t Q;
 int filter_1 = 1;
 int filter_2 = 2;
-q15_t pCoeffs1[5], pCoeffs2[5];
+q15_t pCoeffs1[6], pCoeffs2[5];
 uint8_t numStages = 1;
 q15_t pState1[4], pState2[4];
 int8_t postShift = 1;
@@ -508,13 +508,14 @@ void applyFilter(int filterUsed){
 	Q = 0.707f;
 	coeff_gen('L', Fc, Q, pCoeffs1);
     arm_copy_q15(&buffer[filterBlock][0], &tempSrc[0], BLOCK_SIZE);
-  //  arm_biquad_cascade_df1_q15(&S1,  &buffer[filterBlock][0], &buffer[filterBlock][0], BLOCK_SIZE);
+    arm_biquad_cascade_df1_q15(&S1,  &tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
 }
 
 void coeff_gen(char type, float32_t Fc, float32_t Q, q15_t *pCoeffs) {
 	float b1_output = 0;
 	float b2_output = 0;
 	float b3_output = 0;
+	float a1_output = 0;
 	float a2_output = 0;
 	float a3_output = 0;
 	float a0, a1, a2, b0, b1, b2 = 0;
@@ -562,15 +563,15 @@ void coeff_gen(char type, float32_t Fc, float32_t Q, q15_t *pCoeffs) {
 	b2_output = b1/a0;
 	b3_output = b2/a0;
 
-	//a1_output = 1;//wont need
+	a1_output = 1;//wont need
 	a2_output = (a1/a0)*-1;
 	a3_output = (a2/a0)*-1;
-
-	pCoeffs[0] = b1_output;
-	pCoeffs[1] = b2_output;
-	pCoeffs[2] = b3_output;
-	pCoeffs[3] = a2_output;
-	pCoeffs[4] = a3_output;
+	arm_float_to_q15(&b1_output, &pCoeffs[0], 1);
+	arm_float_to_q15(&b2_output, &pCoeffs[1], 1);
+	arm_float_to_q15(&b3_output, &pCoeffs[2], 1);
+	arm_float_to_q15(&a1_output, &pCoeffs[3], 1);
+	arm_float_to_q15(&a2_output, &pCoeffs[4], 1);
+	arm_float_to_q15(&a3_output, &pCoeffs[5], 1);
 }
 
 
