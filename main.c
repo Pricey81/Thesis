@@ -54,7 +54,7 @@
 // mass storage end
 ///////////////////////////////////////////
 #define pi 3.14159
-#define Fs 44100
+#define Fs 44100.0
 #define	FA_CREATE_ALWAYS	0x08
 #define	FA_WRITE			0x02
 
@@ -104,7 +104,7 @@
 #define TEMPO_LED GPIO_PIN_3
 #define LED_1_GND GPIO_PIN_6
 #define NUM_SAMPLES 128
-#define BLOCK_SIZE 128
+#define BLOCK_SIZE 256
 #define BUFFER_SIZE 256
 ///////////////////////////////////////////
 // DACWrite variables
@@ -119,38 +119,40 @@ float32_t Fc;
 float32_t Q;
 int filter_1 = 1;
 int filter_2 = 2;
-q15_t pCoeffs1[6], pCoeffs2[5];
+float32_t pCoeffs[5];
 uint8_t numStages = 1;
-q15_t pState1[4], pState2[4];
+float32_t pState[4];
 int8_t postShift = 1;
 unsigned long ulADC0_Value[4];
 ///////////////////////////////////////////
-// Biquad
-///////////////////////////////////////////
-arm_biquad_casd_df1_inst_q15 S1; // = {1, pState1, pCoeffs1};
-///////////////////////////////////////////
 //CIRCULAR BUFFER
 ///////////////////////////////////////////
-q15_t buffer[3][BUFFER_SIZE];
+float32_t buffer[3][BUFFER_SIZE];
 short index = 0; // The tail of the loop
-short micValue;
 short inIndex = 0;
 short outIndex = 0;
 short readBlock = 0;
 short filterBlock = 1;
 short writeBlock = 2;
 bool filterWaiting = false;
-q15_t tempSrc[BLOCK_SIZE];
+float32_t tempSrc[BLOCK_SIZE];
 int i;
 static FATFS fso; // The FILINFO structure holds a file information returned by f_stat and f_readdir function
 ///////////////////////////////////////////
+// Biquad
+///////////////////////////////////////////
+arm_biquad_casd_df1_inst_f32 S = {1, pState, pCoeffs};
+///////////////////////////////////////////
 // Prototypes
 ///////////////////////////////////////////
-void DACWrite(unsigned short command,short data);
+void DACWrite(unsigned short command,float data);
 void InitSPI(void);
 void ADCIntHandler(void);
-void coeff_gen(char type, float32_t Fc, float32_t Q, q15_t *pCoeffs);
+void coeff_gen(char type, float32_t Fc, float32_t Q);
 void applyFilter(int filterUsed);
+
+int filterCount[1];
+
 // mass storage starts
 
 //*****************************************************************************
@@ -283,96 +285,6 @@ unsigned long
 USBDMSCEventCallback(void *pvCBData, unsigned long ulEvent,
 		unsigned long ulMsgParam, void *pvMsgData)
 {
-	//
-	// Reset the time out every time an event occurs.
-	//
-	g_ulIdleTimeout = USBMSC_ACTIVITY_TIMEOUT;
-
-	switch(ulEvent)
-	{
-	//
-	// Writing to the device.
-	//
-	case USBD_MSC_EVENT_WRITING:
-	{
-		//
-		// Only update if this is a change.
-		//
-		if(g_eMSCState != MSC_DEV_WRITE)
-		{
-			//
-			// Go to the write state.
-			//
-			g_eMSCState = MSC_DEV_WRITE;
-
-			//
-			// Cause the main loop to update the screen.
-			//
-			g_ulFlags |= FLAG_UPDATE_STATUS;
-		}
-
-		break;
-	}
-
-	//
-	// Reading from the device.
-	//
-	case USBD_MSC_EVENT_READING:
-	{
-		//
-		// Only update if this is a change.
-		//
-		if(g_eMSCState != MSC_DEV_READ)
-		{
-			//
-			// Go to the read state.
-			//
-			g_eMSCState = MSC_DEV_READ;
-
-			//
-			// Cause the main loop to update the screen.
-			//
-			g_ulFlags |= FLAG_UPDATE_STATUS;
-		}
-
-		break;
-	}
-	//
-	// The USB host has disconnected from the device.
-	//
-	case USB_EVENT_DISCONNECTED:
-	{
-		//
-		// Go to the disconnected state.
-		//
-		g_eMSCState = MSC_DEV_DISCONNECTED;
-
-		//
-		// Cause the main loop to update the screen.
-		//
-		g_ulFlags |= FLAG_UPDATE_STATUS;
-
-		break;
-	}
-	//
-	// The USB host has connected to the device.
-	//
-	case USB_EVENT_CONNECTED:
-	{
-		//
-		// Go to the idle state to wait for read/writes.
-		//
-		g_eMSCState = MSC_DEV_IDLE;
-
-		break;
-	}
-	case USBD_MSC_EVENT_IDLE:
-	default:
-	{
-		break;
-	}
-	}
-
 	return(0);
 }
 
@@ -446,10 +358,13 @@ void InitSPI(void) {
 //////////////////////////////////////////////////////////////////////
 // set command, mask and data commands
 //////////////////////////////////////////////////////////////////////
-void DACWrite(unsigned short command, short data) {
+void DACWrite(unsigned short command, float data) {
 	uint16_t write = 0;
 	// set command, mask and data commands
-	write = 0x3000 |  data;
+    //write = 0x3000 |  data;
+	write = (uint16_t) data;
+	write = 0x3000 |  write;
+
 
 	SSIDataPut(SSI2_BASE, write);
 	//
@@ -482,7 +397,7 @@ void ADC_initialise(void)
 }
 
 void readIn(short micValue) {
-	buffer[readBlock][outIndex] = micValue;
+	buffer[readBlock][outIndex] = (float32_t) micValue;
 }
 
 void ADCIntHandler(void)
@@ -506,16 +421,18 @@ void applyFilter(int filterUsed){
 		Fc = 250.0f; // Heart Ascultations
 	}
 	Q = 0.707f;
-	coeff_gen('L', Fc, Q, pCoeffs1);
-    arm_copy_q15(&buffer[filterBlock][0], &tempSrc[0], BLOCK_SIZE);
-    arm_biquad_cascade_df1_q15(&S1,  &tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
+	coeff_gen('L', Fc, Q);
+   // arm_copy_f32(&buffer[filterBlock][0], &tempSrc[BLOCK_SIZE], BLOCK_SIZE);
+	for (i = 0; i < BLOCK_SIZE; i++) {
+				tempSrc[i] = buffer[filterBlock][i];
+			}
+	arm_biquad_cascade_df1_f32(&S, tempSrc, &buffer[filterBlock][0], BLOCK_SIZE);
 }
 
-void coeff_gen(char type, float32_t Fc, float32_t Q, q15_t *pCoeffs) {
+void coeff_gen(char type, float32_t Fc, float32_t Q) {
 	float b1_output = 0;
 	float b2_output = 0;
 	float b3_output = 0;
-	float a1_output = 0;
 	float a2_output = 0;
 	float a3_output = 0;
 	float a0, a1, a2, b0, b1, b2 = 0;
@@ -563,15 +480,25 @@ void coeff_gen(char type, float32_t Fc, float32_t Q, q15_t *pCoeffs) {
 	b2_output = b1/a0;
 	b3_output = b2/a0;
 
-	a1_output = 1;//wont need
-	a2_output = (a1/a0)*-1;
-	a3_output = (a2/a0)*-1;
-	arm_float_to_q15(&b1_output, &pCoeffs[0], 1);
-	arm_float_to_q15(&b2_output, &pCoeffs[1], 1);
-	arm_float_to_q15(&b3_output, &pCoeffs[2], 1);
-	arm_float_to_q15(&a1_output, &pCoeffs[3], 1);
-	arm_float_to_q15(&a2_output, &pCoeffs[4], 1);
-	arm_float_to_q15(&a3_output, &pCoeffs[5], 1);
+	//a1_output = 1.0;//wont need
+	a2_output = (a1/a0)*-1.0;
+	a3_output = (a2/a0)*-1.0;
+//	b1_output = 0.000309365;
+//	b2_output = 0.00061873;
+//	b3_output = 0.000309365;
+//	a2_output = 1.94963;
+//	a3_output = -0.9508677;
+//	arm_float_to_q15(&b1_output, &pCoeffs[0], 1);
+//	arm_float_to_q15(&b2_output, &pCoeffs[1], 1);
+//	arm_float_to_q15(&b3_output, &pCoeffs[2], 1);
+//	//arm_float_to_q15(&a1_output, &pCoeffs[3], 1);
+//	arm_float_to_q15(&a2_output, &pCoeffs[3], 1);
+//	arm_float_to_q15(&a3_output, &pCoeffs[4], 1);
+	pCoeffs[0] = b1_output;
+	pCoeffs[1] = b2_output;
+	pCoeffs[2] = b3_output;
+	pCoeffs[3] = a2_output;
+	pCoeffs[4] = a3_output;
 }
 
 
@@ -622,8 +549,8 @@ PortFunctionInit(void)
 	GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, TEMPO_LED);
 	GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, ChestSounds);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, ExtendedMode);
-	GPIOPadConfigSet(GPIO_PORTE_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4,
-			GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPD); //PUTS LOW ON COL'S WHEN NOT USED
+//	GPIOPadConfigSet(GPIO_PORTE_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4,
+//			GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPD); //PUTS LOW ON COL'S WHEN NOT USED
 	ROM_GPIODirModeSet(GPIO_PORTF_BASE,GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4, GPIO_DIR_MODE_OUT);
 	ROM_GPIODirModeSet(GPIO_PORTC_BASE,GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7, GPIO_DIR_MODE_IN);
 
@@ -641,10 +568,6 @@ PortFunctionInit(void)
 	GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, GPIO_PIN_6 | GPIO_PIN_7);
 	GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3 | GPIO_PIN_6 | GPIO_PIN_7);
 	GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, GPIO_PIN_0 | GPIO_PIN_5);
-
-	// initialise filters
-	arm_biquad_cascade_df1_init_q15(&S1, 1, pCoeffs1, pState1, postShift);
-
 }
 
 
@@ -675,6 +598,8 @@ void main(void) {
 	// Set the clocking to run directly from the crystal.
 	///////////////////////////////////////////////////////////////
 	unsigned long ulRetcode;
+
+	filterCount[0] = 0;
 
 	SysCtlClockSet(SYSCTL_SYSDIV_2_5 | SYSCTL_USE_PLL| SYSCTL_OSC_MAIN |
 			SYSCTL_XTAL_16MHZ);
@@ -736,6 +661,8 @@ void main(void) {
 	GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_0 | GPIO_PIN_1);
 	UARTStdioInit(0);
 	InitSPI();
+	PortFunctionInit();
+	ADC_initialise();
 	while(disk_initialize(0));
 	f_mount(0, &fso);
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER1);
@@ -750,8 +677,7 @@ void main(void) {
 	//
 	IntEnable(INT_TIMER1A);
 	TimerIntEnable(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
-	ADC_initialise();
-	PortFunctionInit();
+
 	// Enable the timers.
 	TimerEnable(TIMER1_BASE, TIMER_A);
 	while (1){
