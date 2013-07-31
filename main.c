@@ -422,11 +422,8 @@ void applyFilter(int filterUsed){
 	}
 	Q = 0.707f;
 	coeff_gen('L', Fc, Q);
-   // arm_copy_f32(&buffer[filterBlock][0], &tempSrc[BLOCK_SIZE], BLOCK_SIZE);
-	for (i = 0; i < BLOCK_SIZE; i++) {
-				tempSrc[i] = buffer[filterBlock][i];
-			}
-	arm_biquad_cascade_df1_f32(&S, tempSrc, &buffer[filterBlock][0], BLOCK_SIZE);
+    arm_copy_f32(&buffer[filterBlock][0], &tempSrc[0], BLOCK_SIZE);
+	arm_biquad_cascade_df1_f32(&S, &tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
 }
 
 void coeff_gen(char type, float32_t Fc, float32_t Q) {
