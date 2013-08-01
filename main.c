@@ -436,7 +436,7 @@ void applyFilter(int filterUsed){
 	}
 	Q = 0.707f;
 
-   coeff_gen('L', Fc, Q);
+   coeff_gen('H', Fc, Q);
 
 
 	int k;
@@ -508,17 +508,7 @@ void coeff_gen(char type, float32_t Fc, float32_t Q) {
 	//a1_output = 1.0;//wont need
 	a2_output = (a1/a0)*-1.0;
 	a3_output = (a2/a0)*-1.0;
-//	b1_output = 0.000309365;
-//	b2_output = 0.00061873;
-//	b3_output = 0.000309365;
-//	a2_output = 1.94963;
-//	a3_output = -0.9508677;
-//	arm_float_to_q15(&b1_output, &coeffs[0], 1);
-//	arm_float_to_q15(&b2_output, &coeffs[1], 1);
-//	arm_float_to_q15(&b3_output, &coeffs[2], 1);
-//	//arm_float_to_q15(&a1_output, &coeffs[3], 1);
-//    arm_float_to_q15(&a2_output, &coeffs[3], 1);
-//    arm_float_to_q15(&a3_output, &coeffs[4], 1);
+
 	coeffs[0] = b1_output;
 	coeffs[1] = b2_output;
 	coeffs[2] = b3_output;
