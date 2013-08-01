@@ -103,9 +103,9 @@
 #define ExtendedMode GPIO_PIN_2 // SW 1 - B
 #define TEMPO_LED GPIO_PIN_3
 #define LED_1_GND GPIO_PIN_6
-#define NUM_SAMPLES 128
-#define BLOCK_SIZE 256
-#define BUFFER_SIZE 256
+#define NUM_SAMPLES 512
+#define BLOCK_SIZE 512
+#define BUFFER_SIZE 512
 ///////////////////////////////////////////
 // DACWrite variables
 ///////////////////////////////////////////
@@ -119,29 +119,30 @@ float32_t Fc;
 float32_t Q;
 int filter_1 = 1;
 int filter_2 = 2;
-float32_t pCoeffs[5];
+float32_t coeffs[6];
 uint8_t numStages = 1;
-float32_t pState[4];
+static float32_t state[4];
+
 int8_t postShift = 1;
 unsigned long ulADC0_Value[4];
 ///////////////////////////////////////////
 //CIRCULAR BUFFER
 ///////////////////////////////////////////
-float32_t buffer[3][BUFFER_SIZE];
+float buffer[3][BUFFER_SIZE];
 short index = 0; // The tail of the loop
 short inIndex = 0;
 short outIndex = 0;
 short readBlock = 0;
 short filterBlock = 1;
 short writeBlock = 2;
-bool filterWaiting = false;
-float32_t tempSrc[BLOCK_SIZE];
+unsigned short filterWaiting = 0;
+float tempSrc[BLOCK_SIZE];
 int i;
 static FATFS fso; // The FILINFO structure holds a file information returned by f_stat and f_readdir function
 ///////////////////////////////////////////
 // Biquad
 ///////////////////////////////////////////
-arm_biquad_casd_df1_inst_f32 S = {1, pState, pCoeffs};
+arm_biquad_casd_df1_inst_f32 S;
 ///////////////////////////////////////////
 // Prototypes
 ///////////////////////////////////////////
@@ -360,6 +361,10 @@ void InitSPI(void) {
 //////////////////////////////////////////////////////////////////////
 void DACWrite(unsigned short command, float data) {
 	uint16_t write = 0;
+
+	data = data * (4096 / 2);
+	data = data + (4096 / 2);
+
 	// set command, mask and data commands
     //write = 0x3000 |  data;
 	write = (uint16_t) data;
@@ -397,7 +402,17 @@ void ADC_initialise(void)
 }
 
 void readIn(short micValue) {
-	buffer[readBlock][outIndex] = (float32_t) micValue;
+	float fval = (float) micValue;
+	fval = fval * 2;
+	fval = fval - 4096.0f;
+	fval = fval / 4096.0f;
+	if(fval > 1) {
+		fval = 1;
+	}
+	if(fval < -1) {
+		fval = -1;
+	}
+	buffer[readBlock][outIndex] = fval;
 }
 
 void ADCIntHandler(void)
@@ -411,6 +426,7 @@ void ADCIntHandler(void)
 }
 
 void applyFilter(int filterUsed){
+
 	if (GPIOPinRead(GPIO_PORTF_BASE, ChestSounds) == ChestSounds) {
 		Fc = 1000.0f; // Chest sounds
 	} else if (GPIOPinRead(GPIO_PORTB_BASE, ExtendedMode) == ExtendedMode) {
@@ -419,9 +435,23 @@ void applyFilter(int filterUsed){
 		Fc = 250.0f; // Heart Ascultations
 	}
 	Q = 0.707f;
-	coeff_gen('L', Fc, Q);
-    arm_copy_f32(&buffer[filterBlock][0], &tempSrc[0], BLOCK_SIZE);
-	arm_biquad_cascade_df1_f32(&S, &tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
+
+   coeff_gen('L', Fc, Q);
+
+
+	int k;
+	for(k = 0; k < 4; k++) {
+		if(isnan(state[k])) {
+			state[k] = 0;
+		}
+	}
+
+
+   arm_copy_f32(&buffer[filterBlock][0], &tempSrc[0], BLOCK_SIZE);
+   // arm_copy_q15(&tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
+   arm_biquad_cascade_df1_f32(&S, &tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
+  // arm_fill_q15(2000, &buffer[filterBlock][0], BLOCK_SIZE);
+
 }
 
 void coeff_gen(char type, float32_t Fc, float32_t Q) {
@@ -483,17 +513,17 @@ void coeff_gen(char type, float32_t Fc, float32_t Q) {
 //	b3_output = 0.000309365;
 //	a2_output = 1.94963;
 //	a3_output = -0.9508677;
-//	arm_float_to_q15(&b1_output, &pCoeffs[0], 1);
-//	arm_float_to_q15(&b2_output, &pCoeffs[1], 1);
-//	arm_float_to_q15(&b3_output, &pCoeffs[2], 1);
-//	//arm_float_to_q15(&a1_output, &pCoeffs[3], 1);
-//	arm_float_to_q15(&a2_output, &pCoeffs[3], 1);
-//	arm_float_to_q15(&a3_output, &pCoeffs[4], 1);
-	pCoeffs[0] = b1_output;
-	pCoeffs[1] = b2_output;
-	pCoeffs[2] = b3_output;
-	pCoeffs[3] = a2_output;
-	pCoeffs[4] = a3_output;
+//	arm_float_to_q15(&b1_output, &coeffs[0], 1);
+//	arm_float_to_q15(&b2_output, &coeffs[1], 1);
+//	arm_float_to_q15(&b3_output, &coeffs[2], 1);
+//	//arm_float_to_q15(&a1_output, &coeffs[3], 1);
+//    arm_float_to_q15(&a2_output, &coeffs[3], 1);
+//    arm_float_to_q15(&a3_output, &coeffs[4], 1);
+	coeffs[0] = b1_output;
+	coeffs[1] = b2_output;
+	coeffs[2] = b3_output;
+	coeffs[3] = a2_output;
+	coeffs[4] = a3_output;
 }
 
 
@@ -505,20 +535,21 @@ void Timer1IntHandler(void)
 
 	if(outIndex >= BUFFER_SIZE) {
 		outIndex = 0;
-		inIndex = 0;
-		readBlock++;
-		filterBlock++;
-		writeBlock++;
-		if(readBlock > 2) {
-			readBlock = 0;
+
+		readBlock--;
+		filterBlock--;
+		writeBlock--;
+
+		if(readBlock < 0) {
+			readBlock = 2;
 		}
-		if(filterBlock > 2) {
-			filterBlock = 0;
+		if(filterBlock < 0) {
+			filterBlock = 2;
 		}
-		if(writeBlock > 2) {
-			writeBlock = 0;
+		if(writeBlock <0) {
+			writeBlock = 2;
 		}
-		filterWaiting = true;
+		filterWaiting = 1;
 	}
 
 	ADCProcessorTrigger(ADC0_BASE, 0);
@@ -562,6 +593,23 @@ PortFunctionInit(void)
 	GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, GPIO_PIN_6 | GPIO_PIN_7);
 	GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3 | GPIO_PIN_6 | GPIO_PIN_7);
 	GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, GPIO_PIN_0 | GPIO_PIN_5);
+
+	//coeff_gen('L', 1000, 0.3);
+
+
+//
+//	float f_coeff[5];
+//	f_coeff[0] = 0.000309365;
+//	f_coeff[1] = 0.00061873;
+//	f_coeff[2] = 0.000309365;
+//	f_coeff[3] = 1.94963;
+//	f_coeff[4] = -0.9508677;
+//
+//	arm_float_to_q15(&f_coeff[0], &coeffs[0], 5);
+
+	coeff_gen('L', 300, 0.7);
+
+	arm_biquad_cascade_df1_init_f32(&S, 1, &coeffs[0], &state[0]);
 }
 
 
@@ -617,19 +665,15 @@ void main(void) {
 	//
 	// Set the USB pins to be controlled by the USB controller.
 	ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
-
 	ROM_GPIOPinTypeUSBAnalog(GPIO_PORTD_BASE, GPIO_PIN_4 | GPIO_PIN_5);
-
 	// Initialize the idle timeout and reset all flags.
 	//
 	g_ulIdleTimeout = 0;
 	g_ulFlags = 0;
-
 	//
 	// Initialize the state to idle.
 	//
 	g_eMSCState = MSC_DEV_DISCONNECTED;
-
 	//
 	// Set the USB stack mode to Device mode with VBUS monitoring.
 	//
@@ -640,12 +684,9 @@ void main(void) {
 	//
 	USBDMSCInit(0, (tUSBDMSCDevice *)&g_sMSCDevice);
 	ulRetcode = disk_initialize(0);
-
 	// mass storage end
-
 	FPULazyStackingEnable();
 	FPUEnable();
-
 	///////////////////////////////////////////////////////////////
 	// Initialize the UART and write status.
 	///////////////////////////////////////////////////////////////
@@ -671,11 +712,10 @@ void main(void) {
 	//
 	IntEnable(INT_TIMER1A);
 	TimerIntEnable(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
-
 	// Enable the timers.
 	TimerEnable(TIMER1_BASE, TIMER_A);
 	while (1){
-		if(filterWaiting) {
+		if(filterWaiting == 1) {
 			filterWaiting = 0;
 			applyFilter(filter_1);
 		}
