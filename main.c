@@ -402,8 +402,6 @@ void readIn(short micValue) {
 
 void ADCIntHandler(void)
 {
-	//while(!ADCIntStatus(ADC0_BASE, 0, false)) {
-	//}
 	ADCIntClear(ADC0_BASE, 0);
 	ADCSequenceDataGet(ADC0_BASE, 0, ulADC0_Value);
 	//   UARTprintf("FX-1A = %5d, FX-1B = %5d, FX-2A = %5d, FX-2B = %5d\r\n",
@@ -559,7 +557,6 @@ PortFunctionInit(void)
 
 	HWREG(GPIO_PORTD_BASE + GPIO_O_LOCK) = GPIO_LOCK_KEY_DD;
 	HWREG(GPIO_PORTD_BASE + GPIO_O_CR) = 0x80;
-
 
 	GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_0 | GPIO_PIN_1);
 	GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, GPIO_PIN_6 | GPIO_PIN_7);
