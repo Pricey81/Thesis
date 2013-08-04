@@ -94,14 +94,14 @@
 // Port D & B - LED GREEN
 #define LED_GRN1 GPIO_PIN_0 // SW 4 - D
 #define LED_GRN2 GPIO_PIN_1 // SW 3 - D
-#define LED_GRN3 GPIO_PIN_0 // SW 2 -B
-#define LED_GRN4 GPIO_PIN_1 // SW 1 - B
 ///////////////////////////////////////////
 // Stethoscope
 ///////////////////////////////////////////
 #define ChestSounds GPIO_PIN_2 // SW 1 - F
 #define ExtendedMode GPIO_PIN_2 // SW 1 - B
-#define TEMPO_LED GPIO_PIN_3
+#define HeartSounds GPIO_PIN_3
+#define HighRange GPIO_PIN_0 // SW 2 -B
+#define HighRange2 GPIO_PIN_1 // SW 1 - B
 #define LED_1_GND GPIO_PIN_6
 #define NUM_SAMPLES 512
 #define BLOCK_SIZE 512
@@ -119,9 +119,9 @@ float32_t Fc;
 float32_t Q;
 int filter_1 = 1;
 int filter_2 = 2;
-float32_t coeffs[6];
+float32_t coeffs[5]; //6
 uint8_t numStages = 1;
-static float32_t state[4];
+static float32_t state[4]; //4
 
 int8_t postShift = 1;
 unsigned long ulADC0_Value[4];
@@ -364,12 +364,9 @@ void DACWrite(unsigned short command, float data) {
 
 	data = data * (4096 / 2);
 	data = data + (4096 / 2);
-
 	// set command, mask and data commands
-    //write = 0x3000 |  data;
-	write = (uint16_t) data;
+ 	write = (uint16_t) data;
 	write = 0x3000 |  write;
-
 
 	SSIDataPut(SSI2_BASE, write);
 	//
@@ -387,7 +384,6 @@ void ADC_initialise(void)
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
 	SysCtlADCSpeedSet(SYSCTL_ADCSPEED_500KSPS);
 	GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3 | GPIO_PIN_4);
-
 	// configure the steps of the Sequencer
 	ADCSequenceConfigure(ADC0_BASE, 0, ADC_TRIGGER_PROCESSOR, 0);
 	ADCSequenceStepConfigure(ADC0_BASE, 0, 0, ADC_CTL_CH2);
@@ -419,8 +415,6 @@ void ADCIntHandler(void)
 {
 	ADCIntClear(ADC0_BASE, 0);
 	ADCSequenceDataGet(ADC0_BASE, 0, ulADC0_Value);
-	//   UARTprintf("FX-1A = %5d, FX-1B = %5d, FX-2A = %5d, FX-2B = %5d\r\n",
-	//	 ulADC0_Value[0], ulADC0_Value[1], ulADC0_Value[2], ulADC0_Value[3]);
 	readIn(ulADC0_Value[0]);
 
 }
@@ -428,16 +422,28 @@ void ADCIntHandler(void)
 void applyFilter(int filterUsed){
 
 	if (GPIOPinRead(GPIO_PORTF_BASE, ChestSounds) == ChestSounds) {
-		Fc = 1000.0f; // Chest sounds
+		Fc = 800.0f; // Chest sounds
+		Q = 0.5f;
+		coeff_gen('L', Fc, Q);
 	} else if (GPIOPinRead(GPIO_PORTB_BASE, ExtendedMode) == ExtendedMode) {
-		Fc = 4000.0f; // Extend mode
+		Fc = 2000.0f; // Extend mode
+		Q = 0.5f;
+		coeff_gen('L', Fc, Q);
+	} else if (GPIOPinRead(GPIO_PORTB_BASE, HeartSounds) == HeartSounds)  {
+		Fc = 100.0f; // Heart Ascultations
+		Q = 0.5f;
+		coeff_gen('L', Fc, Q);
+	} else if (GPIOPinRead(GPIO_PORTB_BASE, HighRange) == HighRange) {
+		Fc = 10000.0f; // high ranges
+		Q = 0.5f;
+		coeff_gen('L', Fc, Q);
+	} else if (GPIOPinRead(GPIO_PORTB_BASE, HighRange2) == HighRange2) {
+		Fc = 15000.0f; // high ranges
+		Q = 0.5f;
+		coeff_gen('L', Fc, Q);
 	} else {
-		Fc = 250.0f; // Heart Ascultations
+		// Normal Use without filtering
 	}
-	Q = 0.707f;
-
-   coeff_gen('H', Fc, Q);
-
 
 	int k;
 	for(k = 0; k < 4; k++) {
@@ -446,12 +452,8 @@ void applyFilter(int filterUsed){
 		}
 	}
 
-
    arm_copy_f32(&buffer[filterBlock][0], &tempSrc[0], BLOCK_SIZE);
-   // arm_copy_q15(&tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
    arm_biquad_cascade_df1_f32(&S, &tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
-  // arm_fill_q15(2000, &buffer[filterBlock][0], BLOCK_SIZE);
-
 }
 
 void coeff_gen(char type, float32_t Fc, float32_t Q) {
@@ -504,8 +506,6 @@ void coeff_gen(char type, float32_t Fc, float32_t Q) {
 	b1_output = b0/a0;
 	b2_output = b1/a0;
 	b3_output = b2/a0;
-
-	//a1_output = 1.0;//wont need
 	a2_output = (a1/a0)*-1.0;
 	a3_output = (a2/a0)*-1.0;
 
@@ -562,9 +562,11 @@ PortFunctionInit(void)
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
 	GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7 );
 	GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_0 | LED_BLUE | GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4);
-	GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, TEMPO_LED);
+	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HeartSounds);
 	GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, ChestSounds);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, ExtendedMode);
+	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HighRange);
+	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HighRange2);
 //	GPIOPadConfigSet(GPIO_PORTE_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4,
 //			GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPD); //PUTS LOW ON COL'S WHEN NOT USED
 	ROM_GPIODirModeSet(GPIO_PORTF_BASE,GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4, GPIO_DIR_MODE_OUT);
@@ -579,29 +581,12 @@ PortFunctionInit(void)
 	HWREG(GPIO_PORTD_BASE + GPIO_O_LOCK) = GPIO_LOCK_KEY_DD;
 	HWREG(GPIO_PORTD_BASE + GPIO_O_CR) = 0x80;
 
-	GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_0 | GPIO_PIN_1);
 	GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, GPIO_PIN_6 | GPIO_PIN_7);
 	GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3 | GPIO_PIN_6 | GPIO_PIN_7);
 	GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, GPIO_PIN_0 | GPIO_PIN_5);
-
-	//coeff_gen('L', 1000, 0.3);
-
-
-//
-//	float f_coeff[5];
-//	f_coeff[0] = 0.000309365;
-//	f_coeff[1] = 0.00061873;
-//	f_coeff[2] = 0.000309365;
-//	f_coeff[3] = 1.94963;
-//	f_coeff[4] = -0.9508677;
-//
-//	arm_float_to_q15(&f_coeff[0], &coeffs[0], 5);
-
-	coeff_gen('L', 300, 0.7);
-
+    // Initialise biquad filter
 	arm_biquad_cascade_df1_init_f32(&S, 1, &coeffs[0], &state[0]);
 }
-
 
 void initialLED(){
 
@@ -615,7 +600,6 @@ void initialLED(){
 
 	GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, LED_GND1 | LED_GND2);
 	GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, LED_GND3 | LED_GND4);
-
 	GPIOPinWrite(GPIO_PORTE_BASE, LED_GND1 | LED_GND2, LED_GND1 | LED_GND2);
 	GPIOPinWrite(GPIO_PORTA_BASE, LED_GND3 | LED_GND4, LED_GND3 | LED_GND4);
 	GPIOPinWrite(GPIO_PORTD_BASE, LED_YEL1 | LED_YEL2 | LED_YEL3 | LED_YEL4, 0);
@@ -688,7 +672,7 @@ void main(void) {
 	InitSPI();
 	PortFunctionInit();
 	ADC_initialise();
-	while(disk_initialize(0));
+    //	while(disk_initialize(0));
 	f_mount(0, &fso);
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER1);
 	// Enable processor interrupts.
