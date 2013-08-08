@@ -34,7 +34,7 @@
 #include "third_party/fatfs/src/diskio.h"
 #include "driverlib/gpio.h"
 #include "driverlib/adc.h"
-#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include "driverlib/usb.h"
 #include "driverlib/udma.h"
@@ -64,7 +64,6 @@
 // Define rows for matrix
 // PORT F
 ///////////////////////////////////////////
-#define ROW_1 GPIO_PIN_0
 #define ROW_2 GPIO_PIN_1
 #define ROW_3 GPIO_PIN_3  //GPIO_PIN_2 used for led troubleshooting and indication
 #define ROW_4 GPIO_PIN_4
@@ -102,6 +101,7 @@
 #define HeartSounds GPIO_PIN_3
 #define HighRange GPIO_PIN_0 // SW 2 -B
 #define HighRange2 GPIO_PIN_1 // SW 1 - B
+#define Recording GPIO_PIN_0 // Port F
 #define LED_1_GND GPIO_PIN_6
 #define NUM_SAMPLES 512
 #define BLOCK_SIZE 512
@@ -110,7 +110,7 @@
 // DACWrite variables
 ///////////////////////////////////////////
 char test = 0;
-unsigned short data;
+//unsigned short testData; // changed from unsigned short
 unsigned short command;
 ///////////////////////////////////////////
 // Biquad Gene
@@ -119,7 +119,7 @@ float32_t Fc;
 float32_t Q;
 int filter_1 = 1;
 int filter_2 = 2;
-float32_t coeffs[5]; //6
+float32_t coeffs[5]; //5
 uint8_t numStages = 1;
 static float32_t state[4]; //4
 
@@ -138,11 +138,38 @@ short writeBlock = 2;
 unsigned short filterWaiting = 0;
 float tempSrc[BLOCK_SIZE];
 int i;
+///////////////////////////////////////////
+// SD Card
 static FATFS fso; // The FILINFO structure holds a file information returned by f_stat and f_readdir function
+char Info[]= "steth.wav";
+//char testData[] = "hello";
+static FIL file;
+WORD size;
+WORD bw;
+uint16_t write;
 ///////////////////////////////////////////
 // Biquad
 ///////////////////////////////////////////
 arm_biquad_casd_df1_inst_f32 S;
+///////////////////////////////////////////
+// Wav file struct
+///////////////////////////////////////////
+typedef struct  WAV_HEADER
+{
+	char                RIFF[4];        /* RIFF Header      */ //Magic header
+	unsigned long       ChunkSize;      /* RIFF Chunk Size  */
+	char                WAVE[4];        /* WAVE Header      */
+	char                fmt[4];         /* FMT header       */
+	unsigned long       Subchunk1Size;  /* Size of the fmt chunk                                */
+	unsigned short      AudioFormat;    /* Audio format 1=PCM,6=mulaw,7=alaw, 257=IBM Mu-Law, 258=IBM A-Law, 259=ADPCM */
+	unsigned short      NumOfChan;      /* Number of channels 1=Mono 2=Sterio                   */
+	unsigned long       SamplesPerSec;  /* Sampling Frequency in Hz                             */
+	unsigned long       bytesPerSec;    /* bytes per second */
+	unsigned short      blockAlign;     /* 2=16-bit mono, 4=16-bit stereo */
+	unsigned short      bitsPerSample;  /* Number of bits per sample      */
+	char                Subchunk2ID[4]; /* "data"  string   */
+	unsigned long       Subchunk2Size;  /* Sampled data length    */
+} wav_hdr;
 ///////////////////////////////////////////
 // Prototypes
 ///////////////////////////////////////////
@@ -151,6 +178,11 @@ void InitSPI(void);
 void ADCIntHandler(void);
 void coeff_gen(char type, float32_t Fc, float32_t Q);
 void applyFilter(int filterUsed);
+void record_Wav(char *Info, float *testData,  WORD size);
+void init_after_header_commence(FIL* file);
+void record_Stop(void);
+//void write_Header(file, WAV_HEADER *wav_hdr);
+
 
 int filterCount[1];
 
@@ -335,6 +367,63 @@ void SD_init(void) {
 }
 
 //////////////////////////////////////////////////////////////////////
+// SD open and read a file, used for testing purposes
+//////////////////////////////////////////////////////////////////////
+void record_Wav(char *Info, float *testData,  WORD size) {
+	WORD bw;
+
+	f_open(&file, Info, FA_CREATE_ALWAYS | FA_WRITE);
+	init_after_header_commence(&file);
+	f_write(&file, testData, size, &bw);
+	f_sync(&file);
+}
+
+void record_Stop(void){
+	f_lseek(&file, 0);
+//	write_Header(file, struct WAV_HEADER *wav_hdr);
+	f_close(&file);
+}
+
+void init_after_header_commence(FIL* file) {
+	f_lseek(file, sizeof(wav_hdr));
+}
+/*
+void header_Values(void){
+	memcpy(&wav_hdr->RIFF, 0x64649425, 4); // little endian 0x64649425 //"RIFF"
+	memcpy(&wav_hdr->ChunkSize, 4 + (8 + SubChunk1Size) + (8 + SubChunk2Size), 4);
+	memcpy(&wav_hdr->WAVE, 0x54651475, 4); // 0x54651475 //"WAVE"
+	memcpy(&wav_hdr->fmt, "fmt ", 4);
+	wav_hdr->AudioFormat = 3;
+	wav_hdr->NumOfChan = 1;
+	wav_hdr->SamplesPerSec = 44100;
+	wav_hdr->bytesPerSec = 44100 * BitsPerSample/8;
+	wav_hdr->blockAlign = BitsPerSample/8;
+	wav_hdr->bitsPerSample = 32;
+	wav_hdr->Subchunk2ID = "data";
+	wav_hdr->Subchunk2Size =  NumSamples * 4; num samples = 256??
+
+	return wav_hdr;
+}*/
+/*
+void write_Header(file, struct WAV_HEADER *wav_hdr){
+
+	f_write(file, &wav_hdr->RIFF, 4, &bw);
+	f_write(file, &wav_hdr->ChunkSize, 4, &bw);
+	f_write(file, &wav_hdr->WAVE, 4, &bw);
+	f_write(file, &wav_hdr->fmt, 4, &bw);
+	f_write(file, &wav_hdr->Subchunk1Size, 4, &bw);
+	f_write(file, &wav_hdr->AudioFormat, 2, &bw);
+	f_write(file, &wav_hdr->NumOfChan, 2, &bw);
+	f_write(file, &wav_hdr->SamplesPerSec, 4, &bw);
+	f_write(file, &wav_hdr->bytesPerSec, 4, &bw);
+	f_write(file, &wav_hdr->blockAlign, 2, &bw);
+	f_write(file, &wav_hdr->bitsPerSample, 2, &bw);
+	f_write(file, &wav_hdr->Subchunk2ID, 4,&bw);
+	f_write(file, &wav_hdr->Subchunk2Size, 4, &bw);
+
+
+}*/
+//////////////////////////////////////////////////////////////////////
 // Set up DAC port B
 //////////////////////////////////////////////////////////////////////
 void InitSPI(void) {
@@ -423,26 +512,29 @@ void applyFilter(int filterUsed){
 
 	if (GPIOPinRead(GPIO_PORTF_BASE, ChestSounds) == ChestSounds) {
 		Fc = 800.0f; // Chest sounds
-		Q = 0.5f;
+		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
 	} else if (GPIOPinRead(GPIO_PORTB_BASE, ExtendedMode) == ExtendedMode) {
 		Fc = 2000.0f; // Extend mode
-		Q = 0.5f;
+		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
 	} else if (GPIOPinRead(GPIO_PORTB_BASE, HeartSounds) == HeartSounds)  {
 		Fc = 100.0f; // Heart Ascultations
-		Q = 0.5f;
+		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
 	} else if (GPIOPinRead(GPIO_PORTB_BASE, HighRange) == HighRange) {
 		Fc = 10000.0f; // high ranges
-		Q = 0.5f;
+		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
 	} else if (GPIOPinRead(GPIO_PORTB_BASE, HighRange2) == HighRange2) {
 		Fc = 15000.0f; // high ranges
-		Q = 0.5f;
+		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
 	} else {
-		// Normal Use without filtering
+		// Normal Use
+		Fc = 1000.0f; // high ranges
+		Q = 0.3f;
+		coeff_gen('L', Fc, Q);
 	}
 
 	int k;
@@ -452,8 +544,14 @@ void applyFilter(int filterUsed){
 		}
 	}
 
-   arm_copy_f32(&buffer[filterBlock][0], &tempSrc[0], BLOCK_SIZE);
-   arm_biquad_cascade_df1_f32(&S, &tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
+	arm_copy_f32(&buffer[filterBlock][0], &tempSrc[0], BLOCK_SIZE);
+	arm_biquad_cascade_df1_f32(&S, &tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
+
+	// Send data to SD card upon record button pressed
+	if (GPIOPinRead(GPIO_PORTB_BASE, Recording) == Recording){
+		record_Wav(Info, buffer[filterBlock], size);
+		record_Stop();
+	}
 }
 
 void coeff_gen(char type, float32_t Fc, float32_t Q) {
@@ -567,9 +665,10 @@ PortFunctionInit(void)
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, ExtendedMode);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HighRange);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HighRange2);
+	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, Recording);
 //	GPIOPadConfigSet(GPIO_PORTE_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4,
 //			GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPD); //PUTS LOW ON COL'S WHEN NOT USED
-	ROM_GPIODirModeSet(GPIO_PORTF_BASE,GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4, GPIO_DIR_MODE_OUT);
+	ROM_GPIODirModeSet(GPIO_PORTF_BASE,GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4, GPIO_DIR_MODE_OUT);
 	ROM_GPIODirModeSet(GPIO_PORTC_BASE,GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7, GPIO_DIR_MODE_IN);
 
 	//First open the lock and select the bits we want to modify in the GPIO commit register.
@@ -622,9 +721,9 @@ void main(void) {
 
 	// mass storage start
 	// Enable SysTick for FatFS at 10ms intervals
-	ROM_SysTickPeriodSet(ROM_SysCtlClockGet() / 100);
-	ROM_SysTickEnable();
-	ROM_SysTickIntEnable();
+//	ROM_SysTickPeriodSet(ROM_SysCtlClockGet() / 100);
+//	ROM_SysTickEnable();
+//	ROM_SysTickIntEnable();
 	//
 	// Configure and enable uDMA
 	//
@@ -656,7 +755,7 @@ void main(void) {
 	// Pass our device information to the USB library and place the device
 	// on the bus.
 	//
-	USBDMSCInit(0, (tUSBDMSCDevice *)&g_sMSCDevice);
+//	USBDMSCInit(0, (tUSBDMSCDevice *)&g_sMSCDevice);
 	ulRetcode = disk_initialize(0);
 	// mass storage end
 	FPULazyStackingEnable();
@@ -672,8 +771,11 @@ void main(void) {
 	InitSPI();
 	PortFunctionInit();
 	ADC_initialise();
-    //	while(disk_initialize(0));
+
+    while(disk_initialize(0)); // sd card
 	f_mount(0, &fso);
+	//char testData[] = "hello there";
+	//SD_Write(Info, testData, size);
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER1);
 	// Enable processor interrupts.
 	//
@@ -688,6 +790,9 @@ void main(void) {
 	TimerIntEnable(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
 	// Enable the timers.
 	TimerEnable(TIMER1_BASE, TIMER_A);
+	// testing SD Card
+
+	//SD_Write(Info, "hello there", size);
 	while (1){
 		if(filterWaiting == 1) {
 			filterWaiting = 0;
