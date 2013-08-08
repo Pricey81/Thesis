@@ -60,6 +60,7 @@
 
 #define LED_RED  GPIO_PIN_1
 #define LED_BLUE  GPIO_PIN_2
+
 ///////////////////////////////////////////
 // Define rows for matrix
 // PORT F
@@ -144,9 +145,10 @@ static FATFS fso; // The FILINFO structure holds a file information returned by 
 char Info[]= "steth.wav";
 //char testData[] = "hello";
 static FIL file;
-WORD size;
 WORD bw;
-uint16_t write;
+
+uint8_t prevRecordState = 0;
+uint32_t noOfSamples = 0;
 ///////////////////////////////////////////
 // Biquad
 ///////////////////////////////////////////
@@ -156,20 +158,23 @@ arm_biquad_casd_df1_inst_f32 S;
 ///////////////////////////////////////////
 typedef struct  WAV_HEADER
 {
-	char                RIFF[4];        /* RIFF Header      */ //Magic header
-	unsigned long       ChunkSize;      /* RIFF Chunk Size  */
-	char                WAVE[4];        /* WAVE Header      */
-	char                fmt[4];         /* FMT header       */
-	unsigned long       Subchunk1Size;  /* Size of the fmt chunk                                */
-	unsigned short      AudioFormat;    /* Audio format 1=PCM,6=mulaw,7=alaw, 257=IBM Mu-Law, 258=IBM A-Law, 259=ADPCM */
-	unsigned short      NumOfChan;      /* Number of channels 1=Mono 2=Sterio                   */
-	unsigned long       SamplesPerSec;  /* Sampling Frequency in Hz                             */
-	unsigned long       bytesPerSec;    /* bytes per second */
-	unsigned short      blockAlign;     /* 2=16-bit mono, 4=16-bit stereo */
-	unsigned short      bitsPerSample;  /* Number of bits per sample      */
-	char                Subchunk2ID[4]; /* "data"  string   */
-	unsigned long       Subchunk2Size;  /* Sampled data length    */
-} wav_hdr;
+	uint32_t             RIFF;        /* RIFF Header      */ //Magic header
+	uint32_t      		ChunkSize;      /* RIFF Chunk Size  */
+	uint32_t             WAVE;        /* WAVE Header      */
+	uint32_t             fmt;         /* FMT header       */
+	uint32_t		        Subchunk1Size;  /* Size of the fmt chunk                                */
+	uint16_t      AudioFormat;    /* Audio format 1=PCM,6=mulaw,7=alaw, 257=IBM Mu-Law, 258=IBM A-Law, 259=ADPCM */
+	uint16_t      NumOfChan;      /* Number of channels 1=Mono 2=Sterio                   */
+	uint32_t       SamplesPerSec;  /* Sampling Frequency in Hz                             */
+	uint32_t       bytesPerSec;    /* bytes per second */
+	uint16_t      blockAlign;     /* 2=16-bit mono, 4=16-bit stereo */
+	uint16_t      bitsPerSample;  /* Number of bits per sample      */
+	uint32_t             Subchunk2ID; /* "data"  string   */
+	uint32_t       Subchunk2Size;  /* Sampled data length    */
+//	float               data[9];        /* Sound Data */
+}wav_hdr;
+
+
 ///////////////////////////////////////////
 // Prototypes
 ///////////////////////////////////////////
@@ -178,13 +183,12 @@ void InitSPI(void);
 void ADCIntHandler(void);
 void coeff_gen(char type, float32_t Fc, float32_t Q);
 void applyFilter(int filterUsed);
-void record_Wav(char *Info, float *testData,  WORD size);
-void init_after_header_commence(FIL* file);
+void record_start(char *Info);
 void record_Stop(void);
+void write_Header(FIL* file, uint32_t noOfSamples);
 //void write_Header(file, WAV_HEADER *wav_hdr);
 
-
-int filterCount[1];
+int cycles = 0;
 
 // mass storage starts
 
@@ -369,60 +373,38 @@ void SD_init(void) {
 //////////////////////////////////////////////////////////////////////
 // SD open and read a file, used for testing purposes
 //////////////////////////////////////////////////////////////////////
-void record_Wav(char *Info, float *testData,  WORD size) {
-	WORD bw;
-
+void record_start(char *Info) {
 	f_open(&file, Info, FA_CREATE_ALWAYS | FA_WRITE);
-	init_after_header_commence(&file);
-	f_write(&file, testData, size, &bw);
-	f_sync(&file);
+	f_lseek(&file, sizeof(wav_hdr));
 }
 
 void record_Stop(void){
 	f_lseek(&file, 0);
-//	write_Header(file, struct WAV_HEADER *wav_hdr);
+	write_Header(&file, noOfSamples);
 	f_close(&file);
 }
 
-void init_after_header_commence(FIL* file) {
-	f_lseek(file, sizeof(wav_hdr));
+void write_Header(FIL* file, uint32_t noOfSamples) {
+	wav_hdr hdr;
+
+	hdr.RIFF = 0x46464952; //0x52494646  big endian was - "RIFF"
+	hdr.ChunkSize = 4*noOfSamples+36;
+	hdr.WAVE =  0x45564157; // little endian was - "WAVE"  0x57415645
+	hdr.fmt = 0x20746d66; //0x666d7420
+	hdr.Subchunk1Size = 16;
+	hdr.AudioFormat = 3;
+	hdr.NumOfChan = 1;
+	hdr.SamplesPerSec = 44100;
+	hdr.bytesPerSec  = 4*hdr.SamplesPerSec*hdr.NumOfChan; // 44100 * 4;
+	hdr.blockAlign = 4*hdr.NumOfChan;
+	hdr.bitsPerSample = 32;
+	hdr.Subchunk2ID =  0x61746164; // 0x64617461 "data"
+	hdr.Subchunk2Size = 4*noOfSamples;  //NumSamples * 4;
+
+	f_write(file, &hdr, sizeof hdr, &bw);
 }
-/*
-void header_Values(void){
-	memcpy(&wav_hdr->RIFF, 0x64649425, 4); // little endian 0x64649425 //"RIFF"
-	memcpy(&wav_hdr->ChunkSize, 4 + (8 + SubChunk1Size) + (8 + SubChunk2Size), 4);
-	memcpy(&wav_hdr->WAVE, 0x54651475, 4); // 0x54651475 //"WAVE"
-	memcpy(&wav_hdr->fmt, "fmt ", 4);
-	wav_hdr->AudioFormat = 3;
-	wav_hdr->NumOfChan = 1;
-	wav_hdr->SamplesPerSec = 44100;
-	wav_hdr->bytesPerSec = 44100 * BitsPerSample/8;
-	wav_hdr->blockAlign = BitsPerSample/8;
-	wav_hdr->bitsPerSample = 32;
-	wav_hdr->Subchunk2ID = "data";
-	wav_hdr->Subchunk2Size =  NumSamples * 4; num samples = 256??
-
-	return wav_hdr;
-}*/
-/*
-void write_Header(file, struct WAV_HEADER *wav_hdr){
-
-	f_write(file, &wav_hdr->RIFF, 4, &bw);
-	f_write(file, &wav_hdr->ChunkSize, 4, &bw);
-	f_write(file, &wav_hdr->WAVE, 4, &bw);
-	f_write(file, &wav_hdr->fmt, 4, &bw);
-	f_write(file, &wav_hdr->Subchunk1Size, 4, &bw);
-	f_write(file, &wav_hdr->AudioFormat, 2, &bw);
-	f_write(file, &wav_hdr->NumOfChan, 2, &bw);
-	f_write(file, &wav_hdr->SamplesPerSec, 4, &bw);
-	f_write(file, &wav_hdr->bytesPerSec, 4, &bw);
-	f_write(file, &wav_hdr->blockAlign, 2, &bw);
-	f_write(file, &wav_hdr->bitsPerSample, 2, &bw);
-	f_write(file, &wav_hdr->Subchunk2ID, 4,&bw);
-	f_write(file, &wav_hdr->Subchunk2Size, 4, &bw);
 
 
-}*/
 //////////////////////////////////////////////////////////////////////
 // Set up DAC port B
 //////////////////////////////////////////////////////////////////////
@@ -547,11 +529,18 @@ void applyFilter(int filterUsed){
 	arm_copy_f32(&buffer[filterBlock][0], &tempSrc[0], BLOCK_SIZE);
 	arm_biquad_cascade_df1_f32(&S, &tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
 
-	// Send data to SD card upon record button pressed
-	if (GPIOPinRead(GPIO_PORTB_BASE, Recording) == Recording){
-		record_Wav(Info, buffer[filterBlock], size);
+	uint8_t recordState = GPIOPinRead(GPIO_PORTB_BASE, Recording) == Recording;
+
+	if (!prevRecordState && recordState) {		//Rising edge
+		record_start(Info);
+	}
+	if (recordState) {		//High state
+		f_write(&file, buffer[filterBlock], BLOCK_SIZE, &bw);
+		noOfSamples += BLOCK_SIZE;
+	} else if (prevRecordState != 0) {		//Falling edge
 		record_Stop();
 	}
+	prevRecordState = recordState;
 }
 
 void coeff_gen(char type, float32_t Fc, float32_t Q) {
@@ -652,7 +641,7 @@ void Timer0IntHandler(void) {
 	TimerIntClear(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
 }
 
-PortFunctionInit(void)
+void PortFunctionInit(void)
 {
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
@@ -712,10 +701,6 @@ void main(void) {
 	///////////////////////////////////////////////////////////////
 	// Set the clocking to run directly from the crystal.
 	///////////////////////////////////////////////////////////////
-	unsigned long ulRetcode;
-
-	filterCount[0] = 0;
-
 	SysCtlClockSet(SYSCTL_SYSDIV_2_5 | SYSCTL_USE_PLL| SYSCTL_OSC_MAIN |
 			SYSCTL_XTAL_16MHZ);
 
@@ -756,7 +741,7 @@ void main(void) {
 	// on the bus.
 	//
 //	USBDMSCInit(0, (tUSBDMSCDevice *)&g_sMSCDevice);
-	ulRetcode = disk_initialize(0);
+	while(disk_initialize(0)); // sd card
 	// mass storage end
 	FPULazyStackingEnable();
 	FPUEnable();
@@ -772,7 +757,6 @@ void main(void) {
 	PortFunctionInit();
 	ADC_initialise();
 
-    while(disk_initialize(0)); // sd card
 	f_mount(0, &fso);
 	//char testData[] = "hello there";
 	//SD_Write(Info, testData, size);
