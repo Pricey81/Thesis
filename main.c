@@ -395,8 +395,8 @@ void write_Header(FIL* file, uint32_t noOfSamples) {
 	hdr.AudioFormat = 3;
 	hdr.NumOfChan = 1;
 	hdr.SamplesPerSec = 44100;
-	hdr.bytesPerSec  = 4*hdr.SamplesPerSec*hdr.NumOfChan; // 44100 * 4;
-	hdr.blockAlign = 4*hdr.NumOfChan;
+	hdr.bytesPerSec  = 176400; // 44100 * 4;
+	hdr.blockAlign = 4;
 	hdr.bitsPerSample = 32;
 	hdr.Subchunk2ID =  0x61746164; // 0x64617461 "data"
 	hdr.Subchunk2Size = 4*noOfSamples;  //NumSamples * 4;
@@ -515,7 +515,7 @@ void applyFilter(int filterUsed){
 	} else {
 		// Normal Use
 		Fc = 1000.0f; // high ranges
-		Q = 0.3f;
+		Q = 0.7f;
 		coeff_gen('L', Fc, Q);
 	}
 
@@ -531,11 +531,11 @@ void applyFilter(int filterUsed){
 
 	uint8_t recordState = GPIOPinRead(GPIO_PORTB_BASE, Recording) == Recording;
 
-	if (!prevRecordState && recordState) {		//Rising edge
+	if (!prevRecordState && recordState) {	 //Rising edge
 		record_start(Info);
 	}
 	if (recordState) {		//High state
-		f_write(&file, buffer[filterBlock], BLOCK_SIZE, &bw);
+		f_write(&file, buffer[filterBlock], BLOCK_SIZE*4, &bw);
 		noOfSamples += BLOCK_SIZE;
 	} else if (prevRecordState != 0) {		//Falling edge
 		record_Stop();
@@ -544,6 +544,7 @@ void applyFilter(int filterUsed){
 }
 
 void coeff_gen(char type, float32_t Fc, float32_t Q) {
+	//int val;
 	float b1_output = 0;
 	float b2_output = 0;
 	float b3_output = 0;
@@ -595,12 +596,13 @@ void coeff_gen(char type, float32_t Fc, float32_t Q) {
 	b3_output = b2/a0;
 	a2_output = (a1/a0)*-1.0;
 	a3_output = (a2/a0)*-1.0;
-
-	coeffs[0] = b1_output;
-	coeffs[1] = b2_output;
-	coeffs[2] = b3_output;
-	coeffs[3] = a2_output;
-	coeffs[4] = a3_output;
+	//for (val = 0; val < numStages; val++){
+		coeffs[0] = b1_output;
+		coeffs[1] = b2_output;
+		coeffs[2] = b3_output;
+		coeffs[3] = a2_output;
+		coeffs[4] = a3_output;
+	//}
 }
 
 
