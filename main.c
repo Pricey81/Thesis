@@ -54,8 +54,8 @@
 // mass storage end
 ///////////////////////////////////////////
 #define pi 3.14159
-#define Fs 44100.0
-#define Fs1 85000.0
+//#define Fs 44100.0
+#define Fs 88200.0
 #define	FA_CREATE_ALWAYS	0x08
 #define	FA_WRITE			0x02
 
@@ -104,8 +104,8 @@
 #define HighFreq2 GPIO_PIN_1 // PD1
 #define oscillatorOn GPIO_PIN_7 // PD7
 #define NUM_SAMPLES 512
-#define BLOCK_SIZE 1024 //512
-#define BUFFER_SIZE 1024 //512
+#define BLOCK_SIZE 512
+#define BUFFER_SIZE 512
 ///////////////////////////////////////////
 // DACWrite variables
 ///////////////////////////////////////////
@@ -193,6 +193,7 @@ void record_start(char *Info);
 void record_Stop(void);
 void write_Header(FIL* file, uint32_t noOfSamples);
 void sine_mixer(uint16_t sineFreq);
+void applyFilter2(int filterUsed);
 
 
 int cycles = 0;
@@ -460,9 +461,10 @@ void sine_mixer(uint16_t sineFreq) {
     int m;
     for (m = 0; m <= BLOCK_SIZE; m++){
     	sine = (((float)sine_Gen[(uint32_t)val] * 2) - 4096) / 4096;
-    	buffer[filterBlock][m] *= sine;      // *buffer[filterBlock][m];
-    	val += (float)(sineFreq/425.0);     //220.5;	//Check this
-    	if (val >= 200.0) {
+    	buffer[filterBlock][m] *= sine;
+    	//sineFreq = sineFreq*(11/10);
+    	val += (sineFreq/(882/2)); //220.5 (441/2) @ 44100kHz
+      	if (val >= 200.0) {
     		val -= 200.0;
     	}
     }
@@ -525,21 +527,13 @@ void applyFilter(int filterUsed){
 		Fc = 100.0f; // Heart Ascultations
 		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
-	} else if (GPIOPinRead(GPIO_PORTD_BASE, HighRange) == HighRange) {
-		Fc = 10000.0f; // high ranges
-		Q = 0.3f;
-		coeff_gen('L', Fc, Q);
 	} else if (GPIOPinRead(GPIO_PORTB_BASE, HighRange2) == HighRange2) {
 		Fc = 15000.0f; // high ranges
 		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
-//	} else if (GPIOPinRead(GPIO_PORTD_BASE, oscillatorOn) == oscillatorOn){
-//		Fc = 15000.0f; // high ranges
-//		Q = 0.3f;
-//		coeff_gen('H', Fc, Q);
 	} else {
 		// Normal Use
-		Fc = 1000.0f; // high ranges
+		Fc = 15000.0f; // high ranges
 		Q = 0.7f;
 		coeff_gen('L', Fc, Q);
 	}
@@ -574,7 +568,7 @@ void coeff_gen(char type, float32_t Fc, float32_t Q) {
 	float a2_output = 0;
 	float a3_output = 0;
 	float a0, a1, a2, b0, b1, b2 = 0;
-	float w0 = 2.0*pi*Fc/Fs; // 44.1kHz sample
+	float w0 = 2.0*pi*Fc/Fs; // 44.1kHz or 82.0kHz sampling
     float c1 = arm_cos_f32(w0);
 	float alpha = arm_sin_f32(w0) / (2.0 * Q);
 	switch (type) {
@@ -655,11 +649,11 @@ void Timer1IntHandler(void)
 	}
 
 	ADCProcessorTrigger(ADC0_BASE, 0);
+
 }
 
 void Timer2IntHandler(void) {
 	TimerIntClear(TIMER2_BASE, TIMER_TIMA_TIMEOUT);
-
 }
 
 void Timer0IntHandler(void) {
@@ -710,6 +704,7 @@ void initialLED(){
 	GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, LED_GND3 | LED_GND4);
 	GPIOPinWrite(GPIO_PORTE_BASE, LED_GND1 | LED_GND2, LED_GND1 | LED_GND2);
 	GPIOPinWrite(GPIO_PORTA_BASE, LED_GND3 | LED_GND4, LED_GND3 | LED_GND4);
+
 }
 
 ///////////////////////////////////////////
@@ -772,32 +767,33 @@ void main(void) {
 
 	f_mount(0, &fso);
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER1);
-	//SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER2);
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER2);
 	// Enable processor interrupts.
 	//
 	IntMasterEnable();
 	// Configure the two 32-bit periodic timers.
 	TimerConfigure(TIMER1_BASE, TIMER_CFG_PERIODIC);
-	//TimerConfigure(TIMER2_BASE, TIMER_CFG_PERIODIC);
-
-    TimerLoadSet(TIMER1_BASE, TIMER_A, SysCtlClockGet() / 44100);
-	//
+	TimerConfigure(TIMER2_BASE, TIMER_CFG_PERIODIC);
+    TimerLoadSet(TIMER1_BASE, TIMER_A, SysCtlClockGet() / 88200);
+    //
 	// Setup the interrupts for the timer timeouts.
 	//
 	IntEnable(INT_TIMER1A);
-	//IntEnable(INT_TIMER2A);
+	IntEnable(INT_TIMER2A);
 	TimerIntEnable(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
-	//TimerIntEnable(TIMER2_BASE, TIMER_TIMA_TIMEOUT);
+	TimerIntEnable(TIMER2_BASE, TIMER_TIMA_TIMEOUT);
 	// Enable the timers.
 	TimerEnable(TIMER1_BASE, TIMER_A);
-	//TimerEnable(TIMER2_BASE, TIMER_A);
+	TimerEnable(TIMER2_BASE, TIMER_A);
 
 	while (1){
 		if(filterWaiting == 1) {
 			filterWaiting = 0;
-			//applyFilter(filter_1);
-			if (GPIOPinRead(GPIO_PORTD_BASE, oscillatorOn) == oscillatorOn){
-				sine_mixer(40);
+			if (GPIOPinRead(GPIO_PORTD_BASE, HighRange) == HighRange){
+				sine_mixer(30000); // 900 Hz approx
+				applyFilter(1);
+			} else {
+				applyFilter(1);
 			}
 		}
 	}
