@@ -54,7 +54,6 @@
 // mass storage end
 ///////////////////////////////////////////
 #define pi 3.14159
-//#define Fs 44100.0
 #define Fs 88200.0
 #define	FA_CREATE_ALWAYS	0x08
 #define	FA_WRITE			0x02
@@ -93,7 +92,7 @@
 ///////////////////////////////////////////
 // Stethoscope
 ///////////////////////////////////////////
-#define ChestSounds GPIO_PIN_2 // PF2
+//#define ChestSounds GPIO_PIN_2 // PF2
 #define ExtendedMode GPIO_PIN_2 // PB2
 #define HeartSounds GPIO_PIN_3 // PB3
 #define HighRange GPIO_PIN_0 // PD0
@@ -102,7 +101,7 @@
 #define LED_1_GND GPIO_PIN_6
 //#define HighFreq1 GPIO_PIN_0 // PB0
 #define HighFreq2 GPIO_PIN_1 // PD1
-#define oscillatorOn GPIO_PIN_7 // PD7
+#define oscillatorOn GPIO_PIN_2 // PF2
 #define NUM_SAMPLES 512
 #define BLOCK_SIZE 512
 #define BUFFER_SIZE 512
@@ -140,7 +139,6 @@ static FATFS fso; // The FILINFO structure holds a file information returned by 
 char Info[]= "steth.wav";
 static FIL file;
 WORD bw;
-
 uint8_t prevRecordState = 0;
 uint32_t noOfSamples = 0;
 ///////////////////////////////////////////
@@ -174,7 +172,7 @@ typedef struct  WAV_HEADER
 	uint32_t      SamplesPerSec;  /* Sampling Frequency in Hz                             */
 	uint32_t      bytesPerSec;    /* bytes per second */
 	uint16_t      blockAlign;     /* 2=16-bit mono, 4=16-bit stereo */
-	uint16_t      bitsPerSample;  /* Number of bits per sample      */
+	uint16_t      bitsPerSample;  /* Number of bits per sample      */      // should this be uint32_t
 	uint32_t      Subchunk2ID; /* "data"  string   */
 	uint32_t      Subchunk2Size;  /* Sampled data length    */
 
@@ -389,7 +387,7 @@ void record_start(char *Info) {
 void record_Stop(void){
 	f_lseek(&file, 0);
 	write_Header(&file, noOfSamples);
-	f_close(&file);
+	f_sync(&file);
 }
 
 void write_Header(FIL* file, uint32_t noOfSamples) {
@@ -402,8 +400,8 @@ void write_Header(FIL* file, uint32_t noOfSamples) {
 	hdr.Subchunk1Size = 16;
 	hdr.AudioFormat = 3;
 	hdr.NumOfChan = 1;
-	hdr.SamplesPerSec = 44100;
-	hdr.bytesPerSec  = 176400; // 44100 * 4;
+	hdr.SamplesPerSec = 88200; //44100;//44100;
+	hdr.bytesPerSec  = 352800;//176400; // 44100 * 4;
 	hdr.blockAlign = 4;
 	hdr.bitsPerSample = 32;
 	hdr.Subchunk2ID =  0x61746164; // 0x64617461 "data"
@@ -459,11 +457,15 @@ void DACWrite(unsigned short command, float data) {
 void sine_mixer(uint16_t sineFreq) {
     float sine;
     int m;
+    short fOld = filterBlock;
     for (m = 0; m <= BLOCK_SIZE; m++){
+    	if (fOld != filterBlock) {
+    		break;
+    	}
     	sine = (((float)sine_Gen[(uint32_t)val] * 2) - 4096) / 4096;
     	buffer[filterBlock][m] *= sine;
     	//sineFreq = sineFreq*(11/10);
-    	val += (sineFreq/(882/2)); //220.5 (441/2) @ 44100kHz
+    	val += (sineFreq/(441)); // 882 220.5 (441/2) @ 44100kHz
       	if (val >= 200.0) {
     		val -= 200.0;
     	}
@@ -515,11 +517,7 @@ void ADCIntHandler(void)
 void applyFilter(int filterUsed){
 	float32_t Fc;
 	float32_t Q;
-	if (GPIOPinRead(GPIO_PORTF_BASE, ChestSounds) == ChestSounds) {
-		Fc = 800.0f; // Chest sounds
-		Q = 0.3f;
-		coeff_gen('L', Fc, Q);
-	} else if (GPIOPinRead(GPIO_PORTB_BASE, ExtendedMode) == ExtendedMode) {
+	if (GPIOPinRead(GPIO_PORTB_BASE, ExtendedMode) == ExtendedMode) {
 		Fc = 2000.0f; // Extend mode
 		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
@@ -527,13 +525,17 @@ void applyFilter(int filterUsed){
 		Fc = 100.0f; // Heart Ascultations
 		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
-	} else if (GPIOPinRead(GPIO_PORTB_BASE, HighRange2) == HighRange2) {
+	} else if (GPIOPinRead(GPIO_PORTD_BASE, HighRange) == HighRange) {
 		Fc = 15000.0f; // high ranges
+		Q = 0.3f;
+		coeff_gen('H', Fc, Q);
+	} else if (GPIOPinRead(GPIO_PORTF_BASE, oscillatorOn) == oscillatorOn) {
+		Fc = 10000.0f; // high ranges
 		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
 	} else {
 		// Normal Use
-		Fc = 15000.0f; // high ranges
+		Fc = 15000.0f;
 		Q = 0.7f;
 		coeff_gen('L', Fc, Q);
 	}
@@ -547,18 +549,22 @@ void applyFilter(int filterUsed){
 	arm_copy_f32(&buffer[filterBlock][0], &tempSrc[0], BLOCK_SIZE);
 	arm_biquad_cascade_df1_f32(&S, &tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
 
-	uint8_t recordState = GPIOPinRead(GPIO_PORTB_BASE, Recording) == Recording;
+	uint8_t recordState = (GPIOPinRead(GPIO_PORTB_BASE, Recording) == Recording);
 
-	if (!prevRecordState && recordState) {	 //Rising edge
+
+	if (!prevRecordState && (GPIOPinRead(GPIO_PORTB_BASE, Recording) == Recording)) {	 //Rising edge
 		record_start(Info);
 	}
-	if (recordState) {		//High state
+	//if (recordState) {		//High state
+	if (GPIOPinRead(GPIO_PORTB_BASE, Recording) == Recording){     //High state
 		f_write(&file, buffer[filterBlock], BLOCK_SIZE*sizeof(float), &bw);
 		noOfSamples += BLOCK_SIZE;
-	} else if (prevRecordState != 0) {		//Falling edge
+	} else
+	if (prevRecordState != 0) {		//Falling edge
 		record_Stop();
 	}
 	prevRecordState = recordState;
+
 }
 
 void coeff_gen(char type, float32_t Fc, float32_t Q) {
@@ -647,9 +653,7 @@ void Timer1IntHandler(void)
 		}
 		filterWaiting = 1;
 	}
-
 	ADCProcessorTrigger(ADC0_BASE, 0);
-
 }
 
 void Timer2IntHandler(void) {
@@ -658,7 +662,6 @@ void Timer2IntHandler(void) {
 
 void Timer0IntHandler(void) {
 	TimerIntClear(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
-
 }
 
 void PortFunctionInit(void)
@@ -670,23 +673,21 @@ void PortFunctionInit(void)
 	GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7 );
 	GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_0 | LED_BLUE | GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HeartSounds);
-	GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, ChestSounds);
+	GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, oscillatorOn);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, ExtendedMode);
 	GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, HighRange);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HighRange2);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, Recording);
 	//GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HighFreq1);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HighFreq2);
-	GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, oscillatorOn);
+	//GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, oscillatorOn);
 	ROM_GPIODirModeSet(GPIO_PORTF_BASE,GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4, GPIO_DIR_MODE_OUT);
 	ROM_GPIODirModeSet(GPIO_PORTC_BASE,GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7, GPIO_DIR_MODE_IN);
-
 	//First open the lock and select the bits we want to modify in the GPIO commit register.
 	//
 	HWREG(GPIO_PORTF_BASE + GPIO_O_LOCK) = GPIO_LOCK_KEY_DD;
 	HWREG(GPIO_PORTF_BASE + GPIO_O_CR) = 0x1;
 	HWREG(GPIO_PORTF_BASE + GPIO_O_LOCK) = 0;
-
 	HWREG(GPIO_PORTD_BASE + GPIO_O_LOCK) = GPIO_LOCK_KEY_DD;
 	HWREG(GPIO_PORTD_BASE + GPIO_O_CR) = 0x80;
 
@@ -697,14 +698,12 @@ void PortFunctionInit(void)
 }
 
 void initialLED(){
-
 	HWREG(GPIO_PORTD_BASE + GPIO_O_LOCK) = GPIO_LOCK_KEY_DD;
 	HWREG(GPIO_PORTD_BASE + GPIO_O_CR) = 0x80;
 	GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, LED_GND1 | LED_GND2);
 	GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, LED_GND3 | LED_GND4);
 	GPIOPinWrite(GPIO_PORTE_BASE, LED_GND1 | LED_GND2, LED_GND1 | LED_GND2);
 	GPIOPinWrite(GPIO_PORTA_BASE, LED_GND3 | LED_GND4, LED_GND3 | LED_GND4);
-
 }
 
 ///////////////////////////////////////////
@@ -751,7 +750,8 @@ void main(void) {
 	//
 	while(disk_initialize(0)); // sd card
 	// mass storage end
-	FPULazyStackingEnable();
+	FPUStackingEnable();
+	FPUFlushToZeroModeSet(FPU_FLUSH_TO_ZERO_EN);
 	FPUEnable();
 	///////////////////////////////////////////////////////////////
 	// Initialize the UART and write status.
@@ -764,37 +764,37 @@ void main(void) {
 	InitSPI();
 	PortFunctionInit();
 	ADC_initialise();
-
 	f_mount(0, &fso);
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER1);
-	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER2);
+	//SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER2);
 	// Enable processor interrupts.
 	//
 	IntMasterEnable();
 	// Configure the two 32-bit periodic timers.
 	TimerConfigure(TIMER1_BASE, TIMER_CFG_PERIODIC);
-	TimerConfigure(TIMER2_BASE, TIMER_CFG_PERIODIC);
+	//TimerConfigure(TIMER2_BASE, TIMER_CFG_PERIODIC);
     TimerLoadSet(TIMER1_BASE, TIMER_A, SysCtlClockGet() / 88200);
     //
 	// Setup the interrupts for the timer timeouts.
 	//
 	IntEnable(INT_TIMER1A);
-	IntEnable(INT_TIMER2A);
+	//IntEnable(INT_TIMER2A);
 	TimerIntEnable(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
-	TimerIntEnable(TIMER2_BASE, TIMER_TIMA_TIMEOUT);
+	//TimerIntEnable(TIMER2_BASE, TIMER_TIMA_TIMEOUT);
 	// Enable the timers.
 	TimerEnable(TIMER1_BASE, TIMER_A);
-	TimerEnable(TIMER2_BASE, TIMER_A);
+	//TimerEnable(TIMER2_BASE, TIMER_A);
 
 	while (1){
 		if(filterWaiting == 1) {
-			filterWaiting = 0;
 			if (GPIOPinRead(GPIO_PORTD_BASE, HighRange) == HighRange){
-				sine_mixer(30000); // 900 Hz approx
 				applyFilter(1);
+				sine_mixer(30000); // 900 Hz approx
 			} else {
 				applyFilter(1);
 			}
+			filterWaiting = 0;
 		}
+
 	}
 }
