@@ -95,13 +95,13 @@
 //#define ChestSounds GPIO_PIN_2 // PF2
 #define ExtendedMode GPIO_PIN_2 // PB2
 #define HeartSounds GPIO_PIN_3 // PB3
-#define HighRange GPIO_PIN_0 // PD0
-#define HighRange2 GPIO_PIN_1 // PB1
+#define Mixer GPIO_PIN_0 // PD0
+#define ChestSounds GPIO_PIN_1 // PB1
 #define Recording GPIO_PIN_0 // PB0
 #define LED_1_GND GPIO_PIN_6
 //#define HighFreq1 GPIO_PIN_0 // PB0
 #define HighFreq2 GPIO_PIN_1 // PD1
-#define oscillatorOn GPIO_PIN_2 // PF2
+#define postMixerLP GPIO_PIN_2 // PF2
 #define NUM_SAMPLES 512
 #define BLOCK_SIZE 512
 #define BUFFER_SIZE 512
@@ -464,7 +464,6 @@ void sine_mixer(uint16_t sineFreq) {
     	}
     	sine = (((float)sine_Gen[(uint32_t)val] * 2) - 4096) / 4096;
     	buffer[filterBlock][m] *= sine;
-    	//sineFreq = sineFreq*(11/10);
     	val += (sineFreq/(441)); // 882 220.5 (441/2) @ 44100kHz
       	if (val >= 200.0) {
     		val -= 200.0;
@@ -511,26 +510,31 @@ void ADCIntHandler(void)
 {
 	ADCIntClear(ADC0_BASE, 0);
 	ADCSequenceDataGet(ADC0_BASE, 0, ulADC0_Value);
-	readIn(ulADC0_Value[0]);
+    readIn(ulADC0_Value[0]);
+
 }
 
 void applyFilter(int filterUsed){
 	float32_t Fc;
 	float32_t Q;
 	if (GPIOPinRead(GPIO_PORTB_BASE, ExtendedMode) == ExtendedMode) {
-		Fc = 2000.0f; // Extend mode
+		Fc = 4000.0f; // Extend mode
 		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
 	} else if (GPIOPinRead(GPIO_PORTB_BASE, HeartSounds) == HeartSounds)  {
-		Fc = 100.0f; // Heart Ascultations
+		Fc = 300.0f; // Heart Ascultations
 		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
-	} else if (GPIOPinRead(GPIO_PORTD_BASE, HighRange) == HighRange) {
-		Fc = 15000.0f; // high ranges
+	} else if (GPIOPinRead(GPIO_PORTB_BASE, ChestSounds) == ChestSounds)  {
+		Fc = 1500.0f; // Heart Ascultations
 		Q = 0.3f;
+		coeff_gen('L', Fc, Q);
+	} else if (GPIOPinRead(GPIO_PORTD_BASE, Mixer) == Mixer) {
+		Fc = 16000.0f; // high ranges
+		Q = 0.7f;
 		coeff_gen('H', Fc, Q);
-	} else if (GPIOPinRead(GPIO_PORTF_BASE, oscillatorOn) == oscillatorOn) {
-		Fc = 10000.0f; // high ranges
+	} else if (GPIOPinRead(GPIO_PORTF_BASE, postMixerLP) == postMixerLP) {
+		Fc = 1000.0f; // high ranges
 		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
 	} else {
@@ -550,7 +554,6 @@ void applyFilter(int filterUsed){
 	arm_biquad_cascade_df1_f32(&S, &tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
 
 	uint8_t recordState = (GPIOPinRead(GPIO_PORTB_BASE, Recording) == Recording);
-
 
 	if (!prevRecordState && (GPIOPinRead(GPIO_PORTB_BASE, Recording) == Recording)) {	 //Rising edge
 		record_start(Info);
@@ -673,18 +676,16 @@ void PortFunctionInit(void)
 	GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7 );
 	GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_0 | LED_BLUE | GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HeartSounds);
-	GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, oscillatorOn);
+	GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, postMixerLP);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, ExtendedMode);
-	GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, HighRange);
-	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HighRange2);
+	GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, Mixer);
+	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, ChestSounds);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, Recording);
-	//GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HighFreq1);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HighFreq2);
-	//GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, oscillatorOn);
 	ROM_GPIODirModeSet(GPIO_PORTF_BASE,GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4, GPIO_DIR_MODE_OUT);
 	ROM_GPIODirModeSet(GPIO_PORTC_BASE,GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7, GPIO_DIR_MODE_IN);
+
 	//First open the lock and select the bits we want to modify in the GPIO commit register.
-	//
 	HWREG(GPIO_PORTF_BASE + GPIO_O_LOCK) = GPIO_LOCK_KEY_DD;
 	HWREG(GPIO_PORTF_BASE + GPIO_O_CR) = 0x1;
 	HWREG(GPIO_PORTF_BASE + GPIO_O_LOCK) = 0;
@@ -693,6 +694,7 @@ void PortFunctionInit(void)
 
 	GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, GPIO_PIN_6 | GPIO_PIN_7);
 	GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, GPIO_PIN_0 | GPIO_PIN_5);
+
 	// Initialise biquad filter
 	arm_biquad_cascade_df1_init_f32(&S, 1, &coeffs[0], &state[0]);
 }
@@ -717,9 +719,6 @@ void main(void) {
 	SysCtlClockSet(SYSCTL_SYSDIV_2_5 | SYSCTL_USE_PLL| SYSCTL_OSC_MAIN |
 			SYSCTL_XTAL_16MHZ);
 
-	//
-	// Configure and enable uDMA
-	//
 	ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_UDMA);
 	SysCtlDelay(10);
 	ROM_uDMAControlBaseSet(&sDMAControlTable[0]);
@@ -766,28 +765,20 @@ void main(void) {
 	ADC_initialise();
 	f_mount(0, &fso);
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER1);
-	//SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER2);
 	// Enable processor interrupts.
-	//
 	IntMasterEnable();
 	// Configure the two 32-bit periodic timers.
 	TimerConfigure(TIMER1_BASE, TIMER_CFG_PERIODIC);
-	//TimerConfigure(TIMER2_BASE, TIMER_CFG_PERIODIC);
-    TimerLoadSet(TIMER1_BASE, TIMER_A, SysCtlClockGet() / 88200);
-    //
-	// Setup the interrupts for the timer timeouts.
-	//
+	TimerLoadSet(TIMER1_BASE, TIMER_A, SysCtlClockGet() / 88200);
+    // Setup the interrupts for the timer timeouts.
 	IntEnable(INT_TIMER1A);
-	//IntEnable(INT_TIMER2A);
 	TimerIntEnable(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
-	//TimerIntEnable(TIMER2_BASE, TIMER_TIMA_TIMEOUT);
-	// Enable the timers.
 	TimerEnable(TIMER1_BASE, TIMER_A);
-	//TimerEnable(TIMER2_BASE, TIMER_A);
+
 
 	while (1){
 		if(filterWaiting == 1) {
-			if (GPIOPinRead(GPIO_PORTD_BASE, HighRange) == HighRange){
+			if (GPIOPinRead(GPIO_PORTD_BASE, Mixer) == Mixer){
 				applyFilter(1);
 				sine_mixer(30000); // 900 Hz approx
 			} else {
