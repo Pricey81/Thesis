@@ -92,19 +92,19 @@
 ///////////////////////////////////////////
 // Stethoscope
 ///////////////////////////////////////////
-//#define ChestSounds GPIO_PIN_2 // PF2
-#define ExtendedMode GPIO_PIN_2 // PB2
-#define HeartSounds GPIO_PIN_3 // PB3
-#define Mixer GPIO_PIN_0 // PD0
+#define HeartSounds GPIO_PIN_0 // PB0
 #define ChestSounds GPIO_PIN_1 // PB1
-#define Recording GPIO_PIN_0 // PB0
+#define ExtendedMode1 GPIO_PIN_2 // PB2
+#define ExtendedMode2 GPIO_PIN_3 // PB3
+#define Mixer GPIO_PIN_0 // PD0
+#define Recording GPIO_PIN_2 // PF2
+#define FiltSpare1 GPIO_PIN_1 // PF1
+#define FiltSpare2 GPIO_PIN_3 // PF3
+// Testing
 #define LED_1_GND GPIO_PIN_6
-//#define HighFreq1 GPIO_PIN_0 // PB0
-#define HighFreq2 GPIO_PIN_1 // PD1
-#define postMixerLP GPIO_PIN_2 // PF2
 #define NUM_SAMPLES 512
 #define BLOCK_SIZE 512
-#define BUFFER_SIZE 512
+#define BUFFER_SIZE 512 //512
 ///////////////////////////////////////////
 // DACWrite variables
 ///////////////////////////////////////////
@@ -124,6 +124,7 @@ unsigned long ulADC0_Value[4];
 //CIRCULAR BUFFER
 ///////////////////////////////////////////
 float buffer[3][BUFFER_SIZE];
+float rec[BUFFER_SIZE];
 short index = 0; // The tail of the loop
 short inIndex = 0;
 short outIndex = 0;
@@ -400,8 +401,8 @@ void write_Header(FIL* file, uint32_t noOfSamples) {
 	hdr.Subchunk1Size = 16;
 	hdr.AudioFormat = 3;
 	hdr.NumOfChan = 1;
-	hdr.SamplesPerSec = 88200; //44100;//44100;
-	hdr.bytesPerSec  = 352800;//176400; // 44100 * 4;
+	hdr.SamplesPerSec = 88200;
+	hdr.bytesPerSec  = 352800; //176400;    //352800; // 44100 * 4;
 	hdr.blockAlign = 4;
 	hdr.bitsPerSample = 32;
 	hdr.Subchunk2ID =  0x61746164; // 0x64617461 "data"
@@ -517,50 +518,52 @@ void ADCIntHandler(void)
 void applyFilter(int filterUsed){
 	float32_t Fc;
 	float32_t Q;
-	if (GPIOPinRead(GPIO_PORTB_BASE, ExtendedMode) == ExtendedMode) {
-		Fc = 4000.0f; // Extend mode
-		Q = 0.3f;
-		coeff_gen('L', Fc, Q);
-	} else if (GPIOPinRead(GPIO_PORTB_BASE, HeartSounds) == HeartSounds)  {
-		Fc = 300.0f; // Heart Ascultations
+	if (GPIOPinRead(GPIO_PORTB_BASE, HeartSounds) == HeartSounds) {
+		Fc = 300.0f; // Extend mode
 		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
 	} else if (GPIOPinRead(GPIO_PORTB_BASE, ChestSounds) == ChestSounds)  {
-		Fc = 1500.0f; // Heart Ascultations
+		Fc = 1000.0f; // Heart Ascultations
+		Q = 0.3f;
+		coeff_gen('L', Fc, Q);
+	} else if (GPIOPinRead(GPIO_PORTB_BASE, ExtendedMode1) == ExtendedMode1)  {
+		Fc = 2000.0f; // Extended1
+		Q = 0.3f;
+		coeff_gen('L', Fc, Q);
+	} else if (GPIOPinRead(GPIO_PORTB_BASE, ExtendedMode2) == ExtendedMode2) {
+		Fc = 4000.0f; // Extended2
 		Q = 0.3f;
 		coeff_gen('L', Fc, Q);
 	} else if (GPIOPinRead(GPIO_PORTD_BASE, Mixer) == Mixer) {
-		Fc = 16000.0f; // high ranges
+		Fc = 16000.0f; // HF Mixing
 		Q = 0.7f;
 		coeff_gen('H', Fc, Q);
-	} else if (GPIOPinRead(GPIO_PORTF_BASE, postMixerLP) == postMixerLP) {
-		Fc = 1000.0f; // high ranges
-		Q = 0.3f;
+	} else if (GPIOPinRead(GPIO_PORTF_BASE, FiltSpare1) == FiltSpare1) {
+		Fc = 100.0f; // Spare 1
+		Q = 0.7f;
 		coeff_gen('L', Fc, Q);
+	} else if (GPIOPinRead(GPIO_PORTF_BASE, FiltSpare2) == FiltSpare2) {
+		Fc = 1000.0f; // Spare 2
+		Q = 0.7f;
+		coeff_gen('H', Fc, Q);
 	} else {
 		// Normal Use
 		Fc = 15000.0f;
 		Q = 0.7f;
 		coeff_gen('L', Fc, Q);
 	}
-	int k;
-	for(k = 0; k < 4; k++) {
-		if(isnan(state[k])) {
-			state[k] = 0;
-		}
-	}
 
 	arm_copy_f32(&buffer[filterBlock][0], &tempSrc[0], BLOCK_SIZE);
 	arm_biquad_cascade_df1_f32(&S, &tempSrc[0], &buffer[filterBlock][0], BLOCK_SIZE);
 
-	uint8_t recordState = (GPIOPinRead(GPIO_PORTB_BASE, Recording) == Recording);
+	uint8_t recordState = (GPIOPinRead(GPIO_PORTF_BASE, Recording) == Recording);
 
-	if (!prevRecordState && (GPIOPinRead(GPIO_PORTB_BASE, Recording) == Recording)) {	 //Rising edge
+	if (!prevRecordState && (GPIOPinRead(GPIO_PORTF_BASE, Recording) == Recording)) {	 //Rising edge
 		record_start(Info);
 	}
 	//if (recordState) {		//High state
-	if (GPIOPinRead(GPIO_PORTB_BASE, Recording) == Recording){     //High state
-		f_write(&file, buffer[filterBlock], BLOCK_SIZE*sizeof(float), &bw);
+	if (GPIOPinRead(GPIO_PORTF_BASE, Recording) == Recording){     //High state
+		f_write(&file, buffer[filterBlock], BLOCK_SIZE*sizeof(float), &bw); // buffer[filterBlock]
 		noOfSamples += BLOCK_SIZE;
 	} else
 	if (prevRecordState != 0) {		//Falling edge
@@ -676,12 +679,13 @@ void PortFunctionInit(void)
 	GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7 );
 	GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_0 | LED_BLUE | GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HeartSounds);
-	GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, postMixerLP);
-	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, ExtendedMode);
-	GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, Mixer);
 	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, ChestSounds);
-	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, Recording);
-	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, HighFreq2);
+	GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, FiltSpare1);
+	GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, FiltSpare2);
+	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, ExtendedMode1);
+	GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, ExtendedMode2);
+	GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, Mixer);
+	GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, Recording);
 	ROM_GPIODirModeSet(GPIO_PORTF_BASE,GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4, GPIO_DIR_MODE_OUT);
 	ROM_GPIODirModeSet(GPIO_PORTC_BASE,GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7, GPIO_DIR_MODE_IN);
 
@@ -747,7 +751,7 @@ void main(void) {
 	// Pass our device information to the USB library and place the device
 	// on the bus.
 	//
-	while(disk_initialize(0)); // sd card
+	while(disk_initialize(0)); // SD card
 	// mass storage end
 	FPUStackingEnable();
 	FPUFlushToZeroModeSet(FPU_FLUSH_TO_ZERO_EN);
@@ -782,7 +786,8 @@ void main(void) {
 				applyFilter(1);
 				sine_mixer(30000); // 900 Hz approx
 			} else {
-				applyFilter(1);
+			   applyFilter(1);
+
 			}
 			filterWaiting = 0;
 		}
